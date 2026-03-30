@@ -1,0 +1,21 @@
+{
+  "run_id": "20260315_193331_mean_reversion_OKLO",
+  "strategy": "mean_reversion",
+  "symbol": "OKLO",
+  "start": "2022-03-16",
+  "end": "2026-03-15",
+  "initial_capital": 100000.0,
+  "stats": {
+    "total_return": 10988.540417919605,
+    "total_return_pct": 0.10988540417919605,
+    "sharpe_ratio": 0.32366950835810976,
+    "max_drawdown": -18987.93177924266,
+    "max_drawdown_pct": -0.15413531571538838,
+    "win_rate": 0.7142857142857143,
+    "avg_win_pct": 0.030648257225953036,
+    "avg_loss_pct": -0.04914929202008361,
+    "num_trades": 14
+  },
+  "saved_at": "2026-03-15T19:33:31.310304",
+  "market_return_pct": 5.016719408739035
+}

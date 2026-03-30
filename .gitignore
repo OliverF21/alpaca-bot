@@ -1,0 +1,29 @@
+# Credentials — never commit these
+.env
+strategy_ide/.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+venv/
+.venv/
+
+# Data cache — large parquet files, regenerated automatically
+strategy_ide/data/cache/
+*.parquet
+
+# Logs and equity tracking
+equity_logs/
+*.log
+/tmp/
+
+# Research output (large, reproducible)
+strategy_ide/research/crypto_results.json
+strategy_ide/research/results.json
+
+# macOS
+.DS_Store

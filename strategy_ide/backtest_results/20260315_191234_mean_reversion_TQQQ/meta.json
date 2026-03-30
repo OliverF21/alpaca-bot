@@ -1,0 +1,20 @@
+{
+  "run_id": "20260315_191234_mean_reversion_TQQQ",
+  "strategy": "mean_reversion",
+  "symbol": "TQQQ",
+  "start": "2022-03-16",
+  "end": "2026-03-15",
+  "initial_capital": 100000.0,
+  "stats": {
+    "total_return": 68842.98670565477,
+    "total_return_pct": 0.6884298670565476,
+    "sharpe_ratio": 0.9533642607356775,
+    "max_drawdown": 0.0,
+    "max_drawdown_pct": 0.0,
+    "win_rate": 1.0,
+    "avg_win_pct": 0.17210746676413693,
+    "avg_loss_pct": 0.0,
+    "num_trades": 4
+  },
+  "saved_at": "2026-03-15T19:12:34.811159"
+}

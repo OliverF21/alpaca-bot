@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alpaca Bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="logo">
+    <span class="logo-icon">▲</span>
+    <span class="logo-text">AlpacaBot</span>
+  </div>
+
+  <nav class="nav">
+    <a class="nav-item active" data-page="portfolio" onclick="navigate('portfolio')">
+      <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+      Portfolio
+    </a>
+    <a class="nav-item" data-page="positions" onclick="navigate('positions')">
+      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg>
+      Positions
+    </a>
+    <a class="nav-item" data-page="activity" onclick="navigate('activity')">
+      <svg viewBox="0 0 24 24"><path d="M13 2.05v2.02c3.95.49 7 3.85 7 7.93 0 3.21-1.81 6.01-4.72 7.72L13 17v5h5l-1.22-1.22C19.91 19.07 22 15.76 22 12c0-5.18-3.95-9.45-9-9.95zM11 2.05C5.95 2.55 2 6.82 2 12c0 3.76 2.09 7.07 5.22 8.78L6 22h5v-5l-2.28 2.28C7.06 17.81 6 14.89 6 12c0-3.93 2.77-7.22 5-7.95V2.05z"/></svg>
+      Activity
+    </a>
+    <a class="nav-item" data-page="screener" onclick="navigate('screener')">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      Screener
+    </a>
+    <a class="nav-item" data-page="backtest" onclick="navigate('backtest')">
+      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
+      Backtest
+    </a>
+    <a class="nav-item" data-page="hyperopt" onclick="navigate('hyperopt')">
+      <svg viewBox="0 0 24 24"><path d="M19.4 13c.04-.32.06-.66.06-1s-.02-.68-.07-1l2.16-1.68c.19-.15.24-.42.12-.64l-2.04-3.53c-.12-.22-.38-.3-.6-.22l-2.55 1.02c-.52-.4-1.08-.74-1.69-.98L14.34 2.9c-.04-.24-.24-.4-.49-.4h-4.08c-.25 0-.44.16-.48.39l-.38 2.57c-.61.24-1.17.58-1.69.98L4.67 5.42c-.23-.08-.49 0-.6.22L2.03 9.17c-.12.22-.07.49.12.64L4.3 11.5c-.05.32-.07.65-.07 1s.02.68.07 1L2.15 15.18c-.19.15-.24.42-.12.64l2.04 3.53c.12.22.38.3.6.22l2.55-1.02c.52.4 1.08.74 1.69.98l.38 2.57c.04.23.23.39.48.39h4.08c.25 0 .44-.16.49-.39l.38-2.57c.61-.24 1.17-.58 1.69-.98l2.55 1.02c.23.08.49 0 .6-.22l2.04-3.53c.12-.22.07-.49-.12-.64L19.4 13zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
+      Optimize
+    </a>
+    <a class="nav-item" data-page="crypto" onclick="navigate('crypto')">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-1.11-.64-1.87-2.22-1.87-1.5 0-2.4.68-2.4 1.64 0 .84.65 1.39 2.67 1.91s4.18 1.39 4.18 3.91c-.01 1.83-1.38 2.83-3.12 3.16z"/></svg>
+      Crypto
+    </a>
+    <a class="nav-item" data-page="logs" onclick="navigate('logs')">
+      <svg viewBox="0 0 24 24"><path d="M20 3H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.89 2-2V5c0-1.11-.89-2-2-2zm0 5h-2V5h2v3zM4 19h16v2H4z"/></svg>
+      Logs
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div id="mode-badge" class="mode-badge"></div>
+    <div class="last-updated" id="last-updated">—</div>
+  </div>
+</aside>
+
+<!-- ── Main ───────────────────────────────────────────────────────────── -->
+<main class="main">
+
+  <!-- PORTFOLIO PAGE -->
+  <div id="page-portfolio" class="page active">
+    <div class="page-header">
+      <h1>Portfolio</h1>
+      <button class="btn-refresh" onclick="loadPortfolio()">↻ Refresh</button>
+    </div>
+
+    <!-- Equity hero -->
+    <div class="equity-hero glass">
+      <div class="equity-label">Total Equity</div>
+      <div class="equity-value" id="equity-value">—</div>
+      <div class="equity-change" id="equity-change"></div>
+      <div class="equity-meta" id="equity-meta"></div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="stats-row">
+      <div class="stat-card glass">
+        <div class="stat-label">Invested</div>
+        <div class="stat-value" id="stat-invested">—</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-label">Cash</div>
+        <div class="stat-value" id="stat-cash">—</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-label">Buying Power</div>
+        <div class="stat-value" id="stat-bp">—</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-label">Open Positions</div>
+        <div class="stat-value" id="stat-positions">—</div>
+      </div>
+    </div>
+
+    <!-- Equity curve -->
+    <div class="card glass">
+      <div class="card-header">
+        <span class="card-title">Equity Curve</span>
+        <div class="range-tabs">
+          <button class="range-tab active" onclick="loadEquityLog(7, this)">1W</button>
+          <button class="range-tab" onclick="loadEquityLog(30, this)">1M</button>
+          <button class="range-tab" onclick="loadEquityLog(90, this)">3M</button>
+          <button class="range-tab" onclick="loadEquityLog(365, this)">1Y</button>
+          <button class="range-tab" onclick="loadEquityLog(9999, this)">All</button>
+        </div>
+      </div>
+      <div id="chart-equity" class="chart-container"></div>
+      <div class="chart-empty" id="chart-equity-empty">
+        Bot hasn't run long enough to generate logs yet.<br>Check back after the first poll cycle.
+      </div>
+    </div>
+
+    <!-- Mini positions -->
+    <div class="card glass">
+      <div class="card-header">
+        <span class="card-title">Holdings</span>
+        <a class="card-link" onclick="navigate('positions')">View all →</a>
+      </div>
+      <div id="holdings-list" class="holdings-list"></div>
+    </div>
+  </div>
+
+  <!-- POSITIONS PAGE -->
+  <div id="page-positions" class="page">
+    <div class="page-header">
+      <h1>Positions</h1>
+      <button class="btn-refresh" onclick="loadPositions()">↻ Refresh</button>
+    </div>
+    <div id="positions-grid" class="positions-grid"></div>
+    <div id="positions-empty" class="empty-state" style="display:none">
+      <div class="empty-icon">◎</div>
+      <div>No open positions right now.</div>
+      <div class="empty-sub">The bot will enter trades when the strategy fires a confirmed signal.</div>
+    </div>
+  </div>
+
+  <!-- ACTIVITY PAGE -->
+  <div id="page-activity" class="page">
+    <div class="page-header">
+      <h1>Activity</h1>
+      <button class="btn-refresh" onclick="loadActivity()">↻ Refresh</button>
+    </div>
+    <div class="card glass">
+      <table class="activity-table" id="activity-table">
+        <thead>
+          <tr>
+            <th>Time</th><th>Symbol</th><th>Side</th>
+            <th>Qty</th><th>Fill Price</th><th>Type</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="activity-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SCREENER PAGE -->
+  <div id="page-screener" class="page">
+    <div class="page-header">
+      <h1>Screener</h1>
+      <div class="header-controls">
+        <select class="select-input" id="screener-universe">
+          <option value="sp100">S&amp;P 100</option>
+          <option value="etfs">Sector ETFs</option>
+          <option value="largecap">Large Cap</option>
+        </select>
+        <button class="btn-primary" onclick="runScreener()">Run Scan</button>
+      </div>
+    </div>
+    <p class="page-sub">Stocks currently showing mean-reversion setups. Green = strongest signal.</p>
+    <div id="screener-loading" class="loading-state" style="display:none">
+      <div class="spinner"></div> Scanning universe…
+    </div>
+    <div class="card glass" id="screener-card" style="display:none">
+      <table class="activity-table" id="screener-table">
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Price</th><th>BB Lower</th>
+            <th>RSI</th><th>Vol Ratio</th><th>Score</th>
+          </tr>
+        </thead>
+        <tbody id="screener-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- BACKTEST PAGE -->
+  <div id="page-backtest" class="page">
+    <div class="page-header">
+      <h1>Backtest</h1>
+    </div>
+
+    <div class="backtest-layout">
+      <!-- Controls -->
+      <div class="backtest-controls card glass">
+        <div class="form-group">
+          <label>Symbol</label>
+          <input type="text" id="bt-symbol" class="text-input" value="AMZN" placeholder="AMZN">
+        </div>
+        <div class="form-group">
+          <label>Strategy</label>
+          <select id="bt-strategy" class="select-input">
+            <option value="hybrid">Hybrid (Trend + Mean Reversion)</option>
+            <option value="mean_reversion">Mean Reversion only</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Bar size</label>
+            <select id="bt-resolution" class="select-input">
+              <option value="15">15-min</option>
+              <option value="D">Daily</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Risk / trade</label>
+            <select id="bt-risk" class="select-input">
+              <option value="0.005">0.5%</option>
+              <option value="0.01" selected>1%</option>
+              <option value="0.02">2%</option>
+              <option value="0.03">3%</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Start</label>
+            <input type="date" id="bt-start" class="text-input" value="2022-01-03">
+          </div>
+          <div class="form-group">
+            <label>End</label>
+            <input type="date" id="bt-end" class="text-input">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Capital ($)</label>
+          <input type="number" id="bt-capital" class="text-input" value="100000" step="10000">
+        </div>
+        <button class="btn-primary btn-full" onclick="runBacktest()">Run Backtest</button>
+      </div>
+
+      <!-- Results -->
+      <div class="backtest-results" id="bt-results" style="display:none">
+        <div class="stats-row" id="bt-stats-row"></div>
+        <div class="card glass">
+          <div class="card-header"><span class="card-title">Equity Curve vs Buy &amp; Hold</span></div>
+          <div id="chart-backtest" class="chart-container"></div>
+        </div>
+        <div class="card glass">
+          <div class="card-header"><span class="card-title">Trades</span></div>
+          <div class="table-scroll">
+            <table class="activity-table">
+              <thead>
+                <tr><th>Entry</th><th>Exit</th><th>Entry $</th><th>Exit $</th><th>P&amp;L</th><th>Return</th></tr>
+              </thead>
+              <tbody id="bt-trades-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="backtest-placeholder card glass" id="bt-placeholder">
+        <div class="empty-icon">◈</div>
+        <div>Configure and run a backtest</div>
+        <div class="empty-sub">Uses Alpaca historical data — up to 4 years of 15-min bars</div>
+      </div>
+    </div>
+
+    <div id="bt-loading" class="loading-state" style="display:none">
+      <div class="spinner"></div> Fetching data and running backtest…
+    </div>
+  </div>
+
+  <!-- HYPEROPT PAGE -->
+  <div id="page-hyperopt" class="page">
+    <div class="page-header">
+      <h1>Optimize</h1>
+    </div>
+    <p class="page-sub">Bayesian hyperparameter search (TPE) — finds the parameter set that maximises your chosen objective on in-sample data, then validates on held-out bars.</p>
+
+    <div class="backtest-layout">
+      <!-- Controls -->
+      <div class="backtest-controls card glass">
+        <div class="form-group">
+          <label>Symbol</label>
+          <input type="text" id="ho-symbol" class="text-input" value="AMZN" placeholder="AMZN">
+        </div>
+        <div class="form-group">
+          <label>Strategy</label>
+          <select id="ho-strategy" class="select-input">
+            <optgroup label="Equity (15-min bars)">
+              <option value="mean_reversion">Mean Reversion</option>
+            </optgroup>
+            <optgroup label="Crypto (1-hour bars)">
+              <option value="crypto_mean_reversion">Crypto Mean Reversion</option>
+              <option value="crypto_trend_following">Crypto Trend Following</option>
+              <option value="crypto_breakout">Crypto Breakout</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Bar size</label>
+            <select id="ho-resolution" class="select-input">
+              <option value="15">15-min</option>
+              <option value="D">Daily</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Trials</label>
+            <select id="ho-evals" class="select-input">
+              <option value="30">30</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Start</label>
+            <input type="date" id="ho-start" class="text-input" value="2022-01-03">
+          </div>
+          <div class="form-group">
+            <label>End</label>
+            <input type="date" id="ho-end" class="text-input">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Objective</label>
+          <select id="ho-objective" class="select-input">
+            <option value="sharpe_ratio">Sharpe Ratio</option>
+            <option value="total_return">Total Return</option>
+            <option value="profit_factor">Profit Factor</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Train / Test split</label>
+          <select id="ho-trainpct" class="select-input">
+            <option value="0.60">60 / 40</option>
+            <option value="0.70" selected>70 / 30</option>
+            <option value="0.80">80 / 20</option>
+          </select>
+        </div>
+        <button class="btn-primary btn-full" onclick="runHyperopt()">Run Optimization</button>
+      </div>
+
+      <!-- Results -->
+      <div class="backtest-results" id="ho-results" style="display:none">
+        <!-- Convergence chart -->
+        <div class="card glass">
+          <div class="card-header">
+            <span class="card-title">Convergence — Best Score per Trial</span>
+            <span class="ho-objective-label" id="ho-obj-label"></span>
+          </div>
+          <div id="chart-hyperopt" class="chart-container"></div>
+        </div>
+
+        <!-- In vs out stats -->
+        <div class="stats-row" id="ho-stats-row"></div>
+
+        <!-- Best params -->
+        <div class="card glass">
+          <div class="card-header"><span class="card-title">Best Parameters Found</span></div>
+          <div id="ho-params-grid" class="ho-params-grid"></div>
+        </div>
+      </div>
+
+      <div class="backtest-placeholder card glass" id="ho-placeholder">
+        <div class="empty-icon">◈</div>
+        <div>Configure and run optimization</div>
+        <div class="empty-sub">TPE Bayesian search — smarter than grid search, faster than random</div>
+      </div>
+    </div>
+
+    <div id="ho-loading" class="loading-state" style="display:none">
+      <div class="spinner"></div> Running <span id="ho-loading-label">50</span> trials…
+    </div>
+  </div>
+
+  <!-- CRYPTO PAGE -->
+  <div id="page-crypto" class="page">
+    <div class="page-header">
+      <h1>Crypto</h1>
+      <button class="btn-refresh" onclick="loadCryptoPositions()">↻ Refresh</button>
+    </div>
+    <p class="page-sub">24/7 crypto trading — separate process from equity scanner. Run <code>python scanner/run_crypto_scanner.py</code> to start.</p>
+
+    <!-- Stats row -->
+    <div class="stats-row">
+      <div class="stat-card glass">
+        <div class="stat-label">Crypto Value</div>
+        <div class="stat-value" id="crypto-stat-value">—</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-label">Unrealized P&amp;L</div>
+        <div class="stat-value" id="crypto-stat-pl">—</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-label">Positions</div>
+        <div class="stat-value" id="crypto-stat-count">—</div>
+      </div>
+      <div class="stat-card glass">
+        <div class="stat-label">Market Status</div>
+        <div class="stat-value">
+          <span class="market-open-badge">
+            <span class="market-open-dot">●</span> OPEN
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Positions -->
+    <div class="card glass">
+      <div class="card-header">
+        <span class="card-title">Open Positions</span>
+      </div>
+      <div id="crypto-positions-grid" class="positions-grid"></div>
+      <div id="crypto-positions-empty" class="empty-state" style="display:none">
+        <div class="empty-icon">₿</div>
+        <div>No open crypto positions.</div>
+        <div class="empty-sub">Start <code>run_crypto_scanner.py</code> to begin automated trading.</div>
+      </div>
+    </div>
+
+    <!-- Screener -->
+    <div class="card glass">
+      <div class="card-header">
+        <span class="card-title">Crypto Screener</span>
+        <button class="btn-primary" onclick="runCryptoScreener()">Run Scan</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 12px">Pairs near lower Bollinger Band with oversold RSI and above-average volume.</p>
+      <div id="crypto-screener-loading" class="loading-state" style="display:none">
+        <div class="spinner"></div> Scanning 12 crypto pairs…
+      </div>
+      <table class="activity-table" id="crypto-screener-table" style="display:none">
+        <thead>
+          <tr>
+            <th>Pair</th><th>Price</th><th>BB Lower</th>
+            <th>RSI</th><th>Vol Ratio</th><th>Score</th>
+          </tr>
+        </thead>
+        <tbody id="crypto-screener-body"></tbody>
+      </table>
+      <div id="crypto-screener-empty" style="color:var(--text-muted);font-size:0.9rem;display:none">
+        No qualifying setups right now.
+      </div>
+    </div>
+
+    <!-- Backtest -->
+    <div class="card glass">
+      <div class="card-header">
+        <span class="card-title">Crypto Backtest</span>
+      </div>
+      <div class="backtest-layout">
+        <div class="backtest-controls card glass" style="padding:16px">
+          <div class="form-group">
+            <label>Strategy</label>
+            <select id="cbt-strategy" class="select-input">
+              <option value="crypto_mean_reversion">Mean Reversion</option>
+              <option value="crypto_trend_following">Trend Following (EMA + ADX)</option>
+              <option value="crypto_breakout">Breakout (Donchian Channel)</option>
+              <option value="crypto_supertrend">Supertrend (ATR Adaptive)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Pair</label>
+              <input type="text" id="cbt-symbol" class="text-input" value="BTC/USD" placeholder="BTC/USD">
+            </div>
+            <div class="form-group">
+              <label>Bar size</label>
+              <select id="cbt-resolution" class="select-input">
+                <option value="60" selected>1-hour</option>
+                <option value="15">15-min</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Start</label>
+              <input type="date" id="cbt-start" class="text-input" value="2022-01-01">
+            </div>
+            <div class="form-group">
+              <label>End</label>
+              <input type="date" id="cbt-end" class="text-input">
+            </div>
+          </div>
+          <div class="form-row" style="gap:8px">
+            <button class="btn-primary btn-full" onclick="runCryptoBacktest()">Run Backtest</button>
+            <button class="btn-secondary btn-full" onclick="runCryptoCompare()" title="Run selected strategy on all 12 pairs">Compare All Pairs</button>
+          </div>
+        </div>
+        <div id="cbt-results" style="display:none">
+          <div class="stats-row" id="cbt-stats-row"></div>
+          <div class="card glass">
+            <div class="card-header"><span class="card-title">Equity Curve vs Buy &amp; Hold</span></div>
+            <div id="chart-crypto-backtest" class="chart-container"></div>
+          </div>
+        </div>
+      </div>
+      <div id="cbt-loading" class="loading-state" style="display:none">
+        <div class="spinner"></div> <span id="cbt-loading-msg">Running backtest…</span>
+      </div>
+      <!-- Compare all pairs table -->
+      <div id="cbt-compare" style="display:none;margin-top:16px">
+        <div class="card-header" style="padding:0 0 8px"><span class="card-title">All Pairs — Ranked by Sharpe</span></div>
+        <table class="activity-table" id="cbt-compare-table">
+          <thead>
+            <tr>
+              <th>Pair</th><th>Sharpe</th><th>Return %</th>
+              <th>vs B&amp;H</th><th>Max DD</th><th>Win Rate</th><th>Trades</th>
+            </tr>
+          </thead>
+          <tbody id="cbt-compare-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Optimize (crypto hyperopt) -->
+    <div class="card glass">
+      <div class="card-header">
+        <span class="card-title">Optimize Crypto Strategy</span>
+      </div>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 12px">Bayesian hyperparameter search (TPE). Finds the best parameters for the selected strategy on the chosen pair, then validates on held-out data.</p>
+      <div class="backtest-layout">
+        <div class="backtest-controls card glass" style="padding:16px">
+          <div class="form-group">
+            <label>Strategy</label>
+            <select id="cho-strategy" class="select-input">
+              <option value="crypto_mean_reversion">Mean Reversion</option>
+              <option value="crypto_trend_following">Trend Following</option>
+              <option value="crypto_breakout">Breakout</option>
+              <option value="crypto_supertrend">Supertrend (ATR Adaptive)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Pair</label>
+              <input type="text" id="cho-symbol" class="text-input" value="BTC/USD" placeholder="BTC/USD">
+            </div>
+            <div class="form-group">
+              <label>Trials</label>
+              <select id="cho-evals" class="select-input">
+                <option value="30">30</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Start</label>
+              <input type="date" id="cho-start" class="text-input" value="2021-01-01">
+            </div>
+            <div class="form-group">
+              <label>End</label>
+              <input type="date" id="cho-end" class="text-input">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Train / Test split</label>
+            <select id="cho-trainpct" class="select-input">
+              <option value="0.70" selected>70 / 30</option>
+              <option value="0.80">80 / 20</option>
+            </select>
+          </div>
+          <button class="btn-primary btn-full" onclick="runCryptoHyperopt()">Run Optimization</button>
+        </div>
+        <div id="cho-results" style="display:none">
+          <div class="card glass">
+            <div class="card-header">
+              <span class="card-title">Convergence</span>
+              <span class="ho-objective-label" id="cho-obj-label"></span>
+            </div>
+            <div id="chart-crypto-hyperopt" class="chart-container"></div>
+          </div>
+          <div class="stats-row" id="cho-stats-row"></div>
+          <div class="card glass">
+            <div class="card-header"><span class="card-title">Best Parameters</span></div>
+            <div id="cho-params-grid" class="ho-params-grid"></div>
+          </div>
+        </div>
+        <div class="backtest-placeholder card glass" id="cho-placeholder">
+          <div class="empty-icon">◈</div>
+          <div>Configure and run crypto optimization</div>
+          <div class="empty-sub">Uses 3 years of hourly data — runs ~2-5 min for 100 trials</div>
+        </div>
+      </div>
+      <div id="cho-loading" class="loading-state" style="display:none">
+        <div class="spinner"></div> Running <span id="cho-loading-label">50</span> trials on crypto…
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Logs ──────────────────────────────────────────────────────────── -->
+  <div id="page-logs" class="page">
+    <div class="page-header">
+      <h1 class="page-title">Bot Logs</h1>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span id="logs-status" style="font-size:12px;color:var(--text-muted)">auto-refreshing every 5s</span>
+        <button class="btn-secondary" onclick="loadLogs()" style="padding:6px 14px;font-size:13px">Refresh</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+      <div class="card glass">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+          <span class="card-title">Equity Scanner</span>
+          <span id="equity-log-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-muted)">—</span>
+        </div>
+        <pre id="equity-log-output" style="
+          margin:0;font-size:11px;line-height:1.55;
+          max-height:600px;overflow-y:auto;
+          white-space:pre-wrap;word-break:break-all;
+          color:var(--text-secondary);
+          font-family:'JetBrains Mono','Fira Code',monospace;
+        ">Loading…</pre>
+      </div>
+
+      <div class="card glass">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+          <span class="card-title">Crypto Scanner (AVAX/USD)</span>
+          <span id="crypto-log-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-muted)">—</span>
+        </div>
+        <pre id="crypto-log-output" style="
+          margin:0;font-size:11px;line-height:1.55;
+          max-height:600px;overflow-y:auto;
+          white-space:pre-wrap;word-break:break-all;
+          color:var(--text-secondary);
+          font-family:'JetBrains Mono','Fira Code',monospace;
+        ">Loading…</pre>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+<script src="/static/js/app.js"></script>
+<script>
+// ── Log viewer ──────────────────────────────────────────────────────────────
+let _logsInterval = null;
+
+function colorizeLine(line) {
+  const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  if (/ERROR/.test(esc))   return `<span style="color:#f87171">${esc}</span>`;
+  if (/WARNING/.test(esc)) return `<span style="color:#fbbf24">${esc}</span>`;
+  if (/ENTER\s*▶|▶\s*ENTER/.test(esc)) return `<span style="color:#34d399;font-weight:600">${esc}</span>`;
+  if (/EXIT\s*◀|◀\s*EXIT/.test(esc))   return `<span style="color:#f87171;font-weight:600">${esc}</span>`;
+  if (/HOLD/.test(esc))    return `<span style="color:#6b7280">${esc}</span>`;
+  if (/GOOD|beats B&amp;H|🏆/.test(esc)) return `<span style="color:#34d399">${esc}</span>`;
+  return esc;
+}
+
+function renderLog(el, lines, badgeEl) {
+  if (!lines || lines.length === 0) { el.innerHTML = '<span style="color:#6b7280">No log data yet.</span>'; return; }
+  const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 40;
+  el.innerHTML = lines.map(colorizeLine).join('');
+  badgeEl.textContent = `${lines.length} lines`;
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+async function loadLogs() {
+  try {
+    const res = await fetch('/api/logs?lines=200');
+    const data = await res.json();
+    renderLog(
+      document.getElementById('equity-log-output'),
+      data.equity || [],
+      document.getElementById('equity-log-badge')
+    );
+    renderLog(
+      document.getElementById('crypto-log-output'),
+      data.crypto || [],
+      document.getElementById('crypto-log-badge')
+    );
+    document.getElementById('logs-status').textContent =
+      'last updated ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    document.getElementById('logs-status').textContent = 'fetch error — ' + e.message;
+  }
+}
+
+// Hook into the existing navigate() function to start/stop polling
+const _origNavigate = typeof navigate === 'function' ? navigate : null;
+document.addEventListener('DOMContentLoaded', () => {
+  const origNav = window.navigate;
+  window.navigate = function(page) {
+    if (origNav) origNav(page);
+    if (page === 'logs') {
+      loadLogs();
+      _logsInterval = _logsInterval || setInterval(loadLogs, 5000);
+    } else {
+      clearInterval(_logsInterval);
+      _logsInterval = null;
+    }
+  };
+});
+</script>
+</body>
+</html>

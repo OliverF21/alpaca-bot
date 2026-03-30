@@ -1,0 +1,21 @@
+{
+  "run_id": "20260315_192414_mean_reversion_VOO",
+  "strategy": "mean_reversion",
+  "symbol": "VOO",
+  "start": "2022-03-16",
+  "end": "2026-03-15",
+  "initial_capital": 100000.0,
+  "stats": {
+    "total_return": 6675.935048167041,
+    "total_return_pct": 0.06675935048167041,
+    "sharpe_ratio": 0.40338674114845713,
+    "max_drawdown": -4937.548790007801,
+    "max_drawdown_pct": -0.046285498109563,
+    "win_rate": 0.6875,
+    "avg_win_pct": 0.016091663739433645,
+    "avg_loss_pct": -0.022049790130419963,
+    "num_trades": 16
+  },
+  "saved_at": "2026-03-15T19:24:14.746525",
+  "market_return_pct": 0.5207859978527378
+}

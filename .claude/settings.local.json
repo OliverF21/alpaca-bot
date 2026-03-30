@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -m pytest strategy_ide/tests/ -v)",
+      "Bash(python -c \":*)",
+      "Bash(python -m pytest strategy_ide/tests/ -q)",
+      "Bash(python main.py --mode backtest --symbol SPY --start 2023-01-01 --end 2024-01-01)",
+      "Bash(python strategy_ide/main.py --mode backtest --symbol SPY --start 2024-01-01 --end 2024-12-01 --resolution 15)",
+      "Bash(python strategy_ide/main.py --mode backtest --symbol SPY --start 2023-01-01 --end 2024-12-01)",
+      "Bash(python3 -c \":*)"
+    ]
+  }
+}

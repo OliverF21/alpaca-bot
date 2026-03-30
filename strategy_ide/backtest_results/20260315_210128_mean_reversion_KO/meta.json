@@ -1,0 +1,21 @@
+{
+  "run_id": "20260315_210128_mean_reversion_KO",
+  "strategy": "mean_reversion",
+  "symbol": "KO",
+  "start": "2025-03-01",
+  "end": "2026-03-15",
+  "initial_capital": 100000.0,
+  "stats": {
+    "total_return": 4397.3941368078085,
+    "total_return_pct": 0.043973941368078084,
+    "sharpe_ratio": 0.9863939238321436,
+    "max_drawdown": 0.0,
+    "max_drawdown_pct": 0.0,
+    "win_rate": 1.0,
+    "avg_win_pct": 0.043973941368078154,
+    "avg_loss_pct": 0.0,
+    "num_trades": 1
+  },
+  "saved_at": "2026-03-15T21:01:28.563963",
+  "market_return_pct": 0.06941371681415953
+}

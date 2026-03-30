@@ -1,0 +1,21 @@
+{
+  "run_id": "20260315_193503_mean_reversion_SPY",
+  "strategy": "mean_reversion",
+  "symbol": "SPY",
+  "start": "2022-03-16",
+  "end": "2026-03-15",
+  "initial_capital": 100000.0,
+  "stats": {
+    "total_return": 16204.666934238892,
+    "total_return_pct": 0.16204666934238893,
+    "sharpe_ratio": 0.8475207314814915,
+    "max_drawdown": -4867.733005229165,
+    "max_drawdown_pct": -0.04188930732002229,
+    "win_rate": 0.7777777777777778,
+    "avg_win_pct": 0.018391699197978,
+    "avg_loss_pct": -0.02385927985732579,
+    "num_trades": 18
+  },
+  "saved_at": "2026-03-15T19:35:03.826927",
+  "market_return_pct": 0.520338827418392
+}

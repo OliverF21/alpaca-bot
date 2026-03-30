@@ -1,0 +1,20 @@
+{
+  "run_id": "20260315_190617_mean_reversion_VOO",
+  "strategy": "mean_reversion",
+  "symbol": "VOO",
+  "start": "2025-07-01",
+  "end": "2026-01-01",
+  "initial_capital": 100000.0,
+  "stats": {
+    "total_return": 0.0,
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown": 0.0,
+    "max_drawdown_pct": 0.0,
+    "win_rate": 0.0,
+    "avg_win_pct": 0.0,
+    "avg_loss_pct": 0.0,
+    "num_trades": 0
+  },
+  "saved_at": "2026-03-15T19:06:17.759692"
+}

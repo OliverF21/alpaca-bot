@@ -1,0 +1,2 @@
+## run server
+cd strategy_ide && streamlit run dashboard/app.py

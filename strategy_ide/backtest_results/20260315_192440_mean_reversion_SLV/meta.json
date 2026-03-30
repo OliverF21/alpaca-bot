@@ -1,0 +1,21 @@
+{
+  "run_id": "20260315_192440_mean_reversion_SLV",
+  "strategy": "mean_reversion",
+  "symbol": "SLV",
+  "start": "2022-03-16",
+  "end": "2026-03-15",
+  "initial_capital": 100000.0,
+  "stats": {
+    "total_return": 26669.476176704877,
+    "total_return_pct": 0.26669476176704876,
+    "sharpe_ratio": 0.7077034495150141,
+    "max_drawdown": -11939.39716428626,
+    "max_drawdown_pct": -0.09425630802823176,
+    "win_rate": 0.8421052631578947,
+    "avg_win_pct": 0.02823423181346319,
+    "avg_loss_pct": -0.06168431574945404,
+    "num_trades": 19
+  },
+  "saved_at": "2026-03-15T19:24:40.821431",
+  "market_return_pct": 2.1453916053656426
+}

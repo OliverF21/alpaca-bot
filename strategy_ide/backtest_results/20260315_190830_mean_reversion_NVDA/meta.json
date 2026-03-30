@@ -1,0 +1,20 @@
+{
+  "run_id": "20260315_190830_mean_reversion_NVDA",
+  "strategy": "mean_reversion",
+  "symbol": "NVDA",
+  "start": "2025-01-01",
+  "end": "2026-01-01",
+  "initial_capital": 100000.0,
+  "stats": {
+    "total_return": 21227.865549782626,
+    "total_return_pct": 0.21227865549782626,
+    "sharpe_ratio": 1.0060060600071379,
+    "max_drawdown": 0.0,
+    "max_drawdown_pct": 0.0,
+    "win_rate": 1.0,
+    "avg_win_pct": 0.21227865549782626,
+    "avg_loss_pct": 0.0,
+    "num_trades": 1
+  },
+  "saved_at": "2026-03-15T19:08:30.289235"
+}
