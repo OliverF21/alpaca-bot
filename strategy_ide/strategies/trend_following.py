@@ -32,7 +32,10 @@ Parameters tuned for daily bars (default):
   trail_pct=0.05            ← exit if price falls 5% from recent high while in trade
 """
 
+import os
+
 import pandas as pd
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 import pandas_ta as ta
 from strategies.base_strategy import BaseStrategy
 

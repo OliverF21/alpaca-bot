@@ -21,6 +21,7 @@ import sys
 from typing import Dict, List, Optional
 
 import pandas as pd
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 import pandas_ta as ta
 from dotenv import load_dotenv
 

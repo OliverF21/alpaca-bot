@@ -133,12 +133,20 @@ class ServiceProcess:
 
     def poll_and_maybe_restart(self, now: float) -> str | None:
         """Return an event message if a crash or restart occurred, else None."""
-        if self.proc is None or self.state == "stopped":
+        if self.state == "stopped":
+            return None
+        if self.proc is None:
+            # No active child process. If we're in crashed state, restart timing is
+            # handled by maybe_do_restart().
             return None
 
         ret = self.proc.poll()
         if ret is None:
             self.state = "running"
+            return None
+
+        # Exit already recorded; don't re-schedule backoff every monitor tick.
+        if self.state == "crashed":
             return None
 
         # Process has exited
@@ -149,13 +157,10 @@ class ServiceProcess:
             self._backoff = min(self._backoff * 2, _BACKOFF_MAX)
 
         self.state = "crashed"
+        self.proc = None
         self.next_restart_at = now + self._backoff
         self.restart_count += 1
         msg += f" — restart in {self._backoff:.0f}s (#{self.restart_count})"
-
-        if now >= self.next_restart_at:
-            self.start()
-            self.state = "running"
 
         return msg
 

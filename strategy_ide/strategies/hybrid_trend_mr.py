@@ -51,7 +51,10 @@ If fewer bars are provided, the regime filter is skipped (neutral — allows
 entries), which degrades gracefully to pure mean reversion behaviour.
 """
 
+import os
+
 import pandas as pd
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 import pandas_ta as ta
 from strategies.base_strategy import BaseStrategy
 

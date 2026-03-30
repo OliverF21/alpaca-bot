@@ -4,11 +4,13 @@ All functions take a DataFrame with OHLCV columns and return the same DataFrame
 with new indicator columns added (or a Series when a single series is returned).
 """
 
+import os
 from typing import Optional
 
 import pandas as pd
 
 try:
+    os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
     import pandas_ta as ta
 except ImportError as e:
     raise ImportError(

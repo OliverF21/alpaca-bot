@@ -30,7 +30,10 @@ Key differences from TrendFollowingStrategy (equity daily):
 Compatible with HyperoptRunner using CRYPTO_TREND_SPACE from hyperopt_runner.py.
 """
 
+import os
+
 import pandas as pd
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 import pandas_ta as ta
 
 from strategies.base_strategy import BaseStrategy

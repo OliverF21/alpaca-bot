@@ -35,7 +35,10 @@ Strategy logic:
 Compatible with HyperoptRunner using CRYPTO_SUPERTREND_SPACE from hyperopt_runner.py.
 """
 
+import os
+
 import pandas as pd
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 import pandas_ta as ta
 import numpy as np
 

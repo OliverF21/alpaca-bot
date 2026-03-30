@@ -15,7 +15,10 @@ Key differences from MeanReversionStrategy (equity 15-min):
 Compatible with HyperoptRunner using CRYPTO_MR_SPACE from hyperopt_runner.py.
 """
 
+import os
+
 import pandas as pd
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 import pandas_ta as ta
 
 from strategies.base_strategy import BaseStrategy

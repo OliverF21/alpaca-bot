@@ -11,7 +11,10 @@ Key differences from daily version:
   - buy_rsi=32        — 15m RSI overshoots more frequently than daily
 """
 
+import os
+
 import pandas as pd
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 import pandas_ta as ta
 from strategies.base_strategy import BaseStrategy
 
