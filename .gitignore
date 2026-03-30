@@ -18,6 +18,7 @@ strategy_ide/data/cache/
 
 # Logs and equity tracking
 equity_logs/
+logs/
 *.log
 /tmp/
 
