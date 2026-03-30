@@ -11,7 +11,9 @@
       "Bash(python3 -c \":*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(python -m pip install -r strategy_ide/requirements.txt fastapi uvicorn yfinance)"
     ]
   }
 }
