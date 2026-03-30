@@ -15,6 +15,7 @@ Press Ctrl-C to stop everything cleanly.
 import argparse
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -52,6 +53,28 @@ ALL_SERVICES = [
 
 _BACKOFF_MIN = 5.0
 _BACKOFF_MAX = 60.0
+_WEB_PORT    = 8000
+
+
+def _free_port(port: int):
+    """Kill any process listening on *port* so the web service can bind."""
+    import signal as _signal
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True, text=True,
+        )
+        pids = [int(p) for p in result.stdout.split() if p.strip().isdigit()]
+        for pid in pids:
+            try:
+                os.kill(pid, _signal.SIGTERM)
+                print(f"  Freed port {port}: killed PID {pid}")
+            except ProcessLookupError:
+                pass
+        if pids:
+            time.sleep(1)   # brief grace period for SIGTERM
+    except Exception as e:
+        print(f"  Warning: could not free port {port}: {e}")
 
 # ── ServiceProcess ─────────────────────────────────────────────────────────────
 
@@ -139,6 +162,8 @@ class ServiceProcess:
     def maybe_do_restart(self, now: float) -> str | None:
         """After backoff delay, actually relaunch a crashed service."""
         if self.state == "crashed" and now >= self.next_restart_at:
+            if self.config.name == "web":
+                _free_port(_WEB_PORT)
             self.start()
             self.state = "running"
             return f"[{self.config.name}] restarted (#{self.restart_count})"
@@ -248,8 +273,10 @@ def main():
     print(f"\nAlpaca Bot  —  starting: {names}")
     print(f"Logs → {log_dir}/\n")
 
-    # Start all services
+    # Start all services (clear port first for web)
     for svc in services:
+        if svc.config.name == "web":
+            _free_port(_WEB_PORT)
         svc.start()
 
     # Monitor loop
