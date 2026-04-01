@@ -342,12 +342,6 @@ class LiveScanner:
         if qty * price < min_order_value:
             qty = max(1, int(min_order_value / price))
         
-        # Debug logging
-        log.info(f"  QTY calc: equity=${equity:,.0f} risk_pct={self.risk_pct:.3f} "
-                f"price=${price:.2f} stop_pct={self.stop_loss_pct:.3f}")
-        log.info(f"  QTY calc: risk_amt=${risk_amt:.0f} stop_dist=${stop_dist:.2f} "
-                f"qty_risk={qty_by_risk} qty_bp={qty_by_bp} final_qty={qty}")
-        
         return qty
 
     def _enter(self, symbol: str, price: float):
@@ -363,7 +357,7 @@ class LiveScanner:
             account = self._trader.get_account()
             current_buying_power = float(account.buying_power)
             order_cost = qty * price
-            if order_cost > current_buying_power * 0.98:  # Allow 2% buffer
+            if order_cost > current_buying_power * 0.95:  # Allow 5% buffer for margin/fees
                 log.warning(f"  ⚠ SKIP ENTER {symbol}: order cost ${order_cost:,.0f} > buying power ${current_buying_power:,.0f}")
                 return
         except Exception as e:
