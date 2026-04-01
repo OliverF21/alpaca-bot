@@ -2,17 +2,16 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# System deps for numpy/pandas compilation + curl for healthcheck
+# System deps for numpy/pandas compilation + curl for healthcheck + git
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ curl && \
+    gcc g++ curl git && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Clone the latest code from GitHub
+RUN git clone https://github.com/OliverF21/alpaca-bot.git /app
 
-# Copy application code
-COPY . .
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Create directories the app expects
 RUN mkdir -p logs equity_logs backtest_results /tmp/bot_logs
