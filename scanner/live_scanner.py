@@ -55,21 +55,24 @@ PAPER      = os.getenv("ALPACA_PAPER", "true").lower() == "true"
 
 class LiveScanner:
     """
-    Polling-based 15-minute scanner.
-    Market data: Finnhub REST API
+    Polling-based scanner for equities.
+    Market data: yfinance / Alpaca REST
     Order execution: Alpaca Trading API
 
     Parameters
     ----------
     strategy : BaseStrategy
-        Strategy instance tuned for 15m bars.
+        Strategy instance (tuned for the chosen resolution).
     watchlist : list[str]
         Broad universe for the screener.
+    core_symbols : list[str]
+        Symbols that are ALWAYS evaluated every poll, bypassing the screener.
+        This guarantees the scanner always has something to trade even when
+        the screener returns zero candidates.
     poll_interval : int
-        Seconds between signal checks. Default: 900 (15 min).
+        Seconds between signal checks.
     screen_interval : int
-        Seconds between full watchlist re-scans. Default: 1800 (30 min).
-        Runs less often than polling since it makes ~90 API calls.
+        Seconds between full watchlist re-scans.
     warmup_bars : int
         Historical bars to pre-load per symbol.
     max_positions : int
@@ -80,12 +83,19 @@ class LiveScanner:
         Hard stop below entry.
     take_profit_pct : float
         Bracket take-profit above entry.
+    resolution : str
+        Bar resolution for data fetching ("5", "15", etc.).
+    confirm_bars : int
+        Number of consecutive entry bars required before acting.
+        Set to 1 to act immediately on first signal (recommended for
+        high-frequency strategies like VWAP reversion).
     """
 
     def __init__(
         self,
         strategy: BaseStrategy,
         watchlist: List[str]      = WATCHLIST_SP100,
+        core_symbols: List[str]   = None,
         poll_interval: int        = 900,
         screen_interval: int      = 1800,
         warmup_bars: int          = 60,
@@ -93,9 +103,12 @@ class LiveScanner:
         risk_pct: float           = 0.02,
         stop_loss_pct: float      = 0.015,
         take_profit_pct: float    = 0.03,
+        resolution: str           = "15",
+        confirm_bars: int         = 2,
     ):
         self.strategy        = strategy
         self.watchlist       = watchlist
+        self.core_symbols    = core_symbols or []
         self.poll_interval   = poll_interval
         self.screen_interval = screen_interval
         self.warmup_bars     = warmup_bars
@@ -103,6 +116,8 @@ class LiveScanner:
         self.risk_pct        = risk_pct
         self.stop_loss_pct   = stop_loss_pct
         self.take_profit_pct = take_profit_pct
+        self.resolution      = resolution
+        self.confirm_bars    = confirm_bars
 
         self._cache: Dict[str, pd.DataFrame]   = {}
         self._active_symbols: List[str]        = []
@@ -113,13 +128,21 @@ class LiveScanner:
         # Alpaca for orders + positions only
         self._trader = TradingClient(API_KEY, SECRET_KEY, paper=PAPER)
 
+        # Build screener — read BB/RSI params from strategy if available,
+        # otherwise use sensible defaults (e.g. VWAP strategy has no bb_window).
+        _bb_window  = getattr(strategy, "bb_window", 20)
+        _bb_std     = getattr(strategy, "bb_std", 2.0)
+        _rsi_window = getattr(strategy, "rsi_window", 14)
+        _buy_rsi    = getattr(strategy, "buy_rsi", 40)
+
         self._screener = MeanReversionScreener(
             watchlist     = self.watchlist,
-            bb_window     = strategy.bb_window,
-            bb_std        = strategy.bb_std,
-            rsi_window    = strategy.rsi_window,
-            max_rsi       = strategy.buy_rsi + 6,
+            bb_window     = _bb_window,
+            bb_std        = _bb_std,
+            rsi_window    = _rsi_window,
+            max_rsi       = _buy_rsi + 10,   # wider pre-filter for more candidates
             lookback_bars = self.warmup_bars,
+            resolution    = self.resolution,
         )
 
         mode = "PAPER" if PAPER else "⚠️  LIVE"
@@ -150,12 +173,9 @@ class LiveScanner:
 
     def _confirm_signal(self, symbol: str, raw_signal: str) -> str:
         """
-        Require 2 consecutive 15-min bars showing an entry before acting.
+        Require `confirm_bars` consecutive bars showing an entry before acting.
 
-        Why: a single bar touching the lower Bollinger Band can be a data
-        spike or a one-bar wick that immediately reverses.  Two consecutive
-        bars below the band with low RSI is a much stronger confirmation.
-
+        Set confirm_bars=1 to act on the first signal (no confirmation delay).
         On any non-entry bar the counter resets to zero.
         """
         if raw_signal == "enter":
@@ -163,9 +183,9 @@ class LiveScanner:
                 self._entry_confirmation.get(symbol, 0) + 1
             )
             count = self._entry_confirmation[symbol]
-            if count >= 2:
+            if count >= self.confirm_bars:
                 return "enter"
-            log.info(f"  {symbol}: entry pending confirmation ({count}/2)")
+            log.info(f"  {symbol}: entry pending confirmation ({count}/{self.confirm_bars})")
             return "hold"
         # Reset counter on anything other than enter
         self._entry_confirmation[symbol] = 0
@@ -237,8 +257,8 @@ class LiveScanner:
     # ── Warmup ────────────────────────────────────────────────────────────────
 
     def _warmup(self, symbols: List[str]):
-        log.info(f"Warming up {len(symbols)} symbols...")
-        bars = fetch_bars_bulk(symbols, resolution="15", n_bars=self.warmup_bars)
+        log.info(f"Warming up {len(symbols)} symbols ({self.resolution}-min bars)...")
+        bars = fetch_bars_bulk(symbols, resolution=self.resolution, n_bars=self.warmup_bars)
         for symbol, df in bars.items():
             self._cache[symbol] = df
             log.info(f"  {symbol}: {len(df)} bars cached")
@@ -248,7 +268,7 @@ class LiveScanner:
     def _refresh_and_evaluate(self, symbol: str) -> str:
         """Fetch latest bars, update cache, run strategy, return signal."""
         try:
-            df_new = fetch_bars(symbol, resolution="15", n_bars=self.warmup_bars)
+            df_new = fetch_bars(symbol, resolution=self.resolution, n_bars=self.warmup_bars)
         except Exception as e:
             log.warning(f"  {symbol}: data refresh failed — {e}")
             return "hold"
@@ -356,7 +376,12 @@ class LiveScanner:
             positions = self._safe_open_positions()
             n_open    = len(positions)
 
-            for symbol in list(self._active_symbols):
+            # Merge core symbols (always evaluated) with screener candidates
+            poll_symbols = list(dict.fromkeys(
+                self.core_symbols + self._active_symbols
+            ))
+
+            for symbol in poll_symbols:
                 log.info(f"[{symbol}]")
 
                 price = float("nan")
@@ -404,21 +429,31 @@ class LiveScanner:
     def run(self):
         mode = "PAPER" if PAPER else "LIVE"
         log.info(f"\n{'━'*55}")
-        log.info(f"  Mean Reversion Scanner  [{mode}]  15m bars")
-        log.info(f"  Data  : Alpaca REST / yfinance")
-        log.info(f"  Exec  : Alpaca Trading API")
-        log.info(f"  Polls : every {self.poll_interval}s")
-        log.info(f"  Scans : every {self.screen_interval}s")
+        log.info(f"  Scanner  [{mode}]  {self.resolution}-min bars")
+        log.info(f"  Strategy : {self.strategy.name}")
+        log.info(f"  Data     : Alpaca REST / yfinance")
+        log.info(f"  Exec     : Alpaca Trading API")
+        log.info(f"  Polls    : every {self.poll_interval}s")
+        log.info(f"  Scans    : every {self.screen_interval}s")
+        log.info(f"  Confirm  : {self.confirm_bars} bar(s)")
+        if self.core_symbols:
+            log.info(f"  Core     : {self.core_symbols}")
         log.info(f"{'━'*55}\n")
+
+        # Always warm up core symbols first
+        if self.core_symbols:
+            self._warmup(self.core_symbols)
 
         log.info("Running initial screen...")
         candidates           = self._screener.scan()
         self._active_symbols = [c["symbol"] for c in candidates]
 
-        if self._active_symbols:
-            self._warmup(self._active_symbols)
-        else:
-            log.info("No initial candidates — screener retries in background")
+        # Warm up screener candidates (skip already-warmed core symbols)
+        to_warm = [s for s in self._active_symbols if s not in self._cache]
+        if to_warm:
+            self._warmup(to_warm)
+        elif not self._active_symbols:
+            log.info("No initial screener candidates — core symbols still active")
 
         threading.Thread(
             target=self._screener_loop, daemon=True, name="screener"

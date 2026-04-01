@@ -1,15 +1,14 @@
 """
 scanner/run_scanner.py
 ━━━━━━━━━━━━━━━━━━━━━━
-Launch the 15-minute live scanner using the Hybrid Trend + Mean Reversion strategy.
+Launch the live equity scanner with VWAP reversion (5-min) as the primary
+strategy, plus the Hybrid Trend + Mean Reversion (15-min) as a secondary.
 
-The hybrid strategy combines two filters:
-  1. Regime filter   — only go long when the stock is above its 200-day SMA
-                       (avoids entering dips in a downtrend / bear market)
-  2. Mean reversion  — enter on BB lower-band + RSI oversold, exit at upper band
-
-warmup_bars=5200 supplies 200 trading days of 15-min history so the strategy
-can compute a valid 200-day SMA on startup.
+Two scanner instances run in parallel threads:
+  1. VWAP scanner   — 5-min bars, polls every 300s, no confirmation delay.
+     Designed for multiple trades per day on liquid large-caps.
+  2. Hybrid scanner — 15-min bars, polls every 900s, 1-bar confirmation.
+     Catches deeper pullbacks in uptrending stocks.
 
 Run:
     python scanner/run_scanner.py
@@ -17,84 +16,98 @@ Run:
 
 import sys
 import os
+import threading
+
 _REPO = os.path.join(os.path.dirname(__file__), "..")
 _STRATEGY_IDE = os.path.join(_REPO, "strategy_ide")
 sys.path.insert(0, _REPO)
-sys.path.insert(0, _STRATEGY_IDE)  # so strategy_ide.strategies.* can use "from strategies.base_strategy"
+sys.path.insert(0, _STRATEGY_IDE)
 
 from dotenv import load_dotenv
 load_dotenv()
-load_dotenv(os.path.join(_REPO, "strategy_ide", ".env"))  # strategy_ide .env has Alpaca keys
+load_dotenv(os.path.join(_REPO, "strategy_ide", ".env"))
 
-# Strategy lives in strategy_ide when run from repo root
 try:
+    from strategy_ide.strategies.vwap_reversion import VWAPReversionStrategy
     from strategy_ide.strategies.hybrid_trend_mr import HybridTrendMRStrategy
 except ImportError:
+    from strategies.vwap_reversion import VWAPReversionStrategy
     from strategies.hybrid_trend_mr import HybridTrendMRStrategy
-from scanner.screener import WATCHLIST_SP100, WATCHLIST_SECTOR_ETFS, WATCHLIST_LARGE_CAP
+
+from scanner.screener import WATCHLIST_SP100, WATCHLIST_LARGE_CAP
 from scanner.live_scanner import LiveScanner
 from strategy_ide.monitor.equity_monitor import EquityMonitor
 from pathlib import Path
 
-# ── Strategy ──────────────────────────────────────────────────────────────────
-# Hybrid: 200-day SMA regime filter + 15-min Bollinger Band / RSI mean reversion.
-# Only enters long when the stock is above its 200-day SMA (uptrend confirmed).
-#
-# Parameters updated 2026-03-20 based on 300-trial cross-ticker hyperopt analysis
-# (see cross_ticker_analysis.md). Consensus params from tickers with positive
-# out-of-sample Sharpe: META (gap 0.019), MSFT (gap 0.038), JPM (gap 0.418),
-# TSLA (gap 0.229), NVDA (gap -0.566).
-#
-# Default backtest results (2022-2025, 15-min bars, updated params):
-#   META:  Sharpe 0.914  +38%  MaxDD -10%   B&H +96%
-#   JPM:   Sharpe 1.144  +32%  MaxDD  -8%   B&H +122%
-#   MSFT:  Sharpe 0.868  +16%  MaxDD  -3%   B&H +49%
-#   AMZN:  Sharpe 1.316  +46%  MaxDD  -7%   B&H +38%  ← beats B&H
-#   TSLA:  Sharpe -0.226 -12%  MaxDD -24%   (high-risk, lower priority)
-#   NVDA:  Sharpe 0.775  +40%  MaxDD -21%   B&H +513% ← trend play, not MR
-#
-# Excluded (negative OOS Sharpe in hyperopt): SPY, QQQ, AAPL, GOOGL
+# ── VWAP Reversion (primary — high frequency) ────────────────────────────────
+# 5-min bars, relaxed thresholds, no confirmation delay.
+# Targets: liquid large-caps where VWAP acts as a magnet.
 
-STRATEGY = HybridTrendMRStrategy(
-    bb_window        = 40,    # wider: fewer false signals vs old 20
-    bb_std           = 2.1,   # slightly wider bands
-    rsi_window       = 18,    # smoother RSI vs old 14
-    buy_rsi          = 32,    # unchanged — solid across tickers
-    sell_rsi         = 62,    # tighter exit vs old 65
-    exit_target      = "upper",
+VWAP_STRATEGY = VWAPReversionStrategy(
+    rsi_window      = 10,
+    buy_rsi         = 40,
+    sell_rsi        = 55,
+    vwap_dev_mult   = 1.5,
+    min_bars_in_day = 12,     # skip first hour
+    stop_loss_pct   = 0.005,  # 0.5% stop
+    take_profit_pct = 0.01,   # 1.0% TP
+)
+
+# Core symbols always evaluated every poll (bypass screener).
+# These are the most liquid US equities — tight spreads, deep books.
+VWAP_CORE = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA"]
+
+vwap_scanner = LiveScanner(
+    strategy        = VWAP_STRATEGY,
+    watchlist       = WATCHLIST_LARGE_CAP,
+    core_symbols    = VWAP_CORE,
+    poll_interval   = 300,       # every 5 minutes
+    screen_interval = 1800,      # re-scan every 30 min
+    warmup_bars     = 80,        # ~6.5 hours of 5-min bars
+    max_positions   = 3,
+    risk_pct        = 0.01,      # 1% risk per trade
+    stop_loss_pct   = 0.005,
+    take_profit_pct = 0.01,
+    resolution      = "5",
+    confirm_bars    = 1,         # act on first signal — no delay
+)
+
+
+# ── Hybrid Trend + MR (secondary — deeper pullbacks) ─────────────────────────
+# 15-min bars, catches bigger dips in uptrending stocks.
+# Parameters from cross-ticker hyperopt (see cross_ticker_analysis.md).
+
+HYBRID_STRATEGY = HybridTrendMRStrategy(
+    bb_window        = 20,     # tighter than old 40 — more entry opportunities
+    bb_std           = 1.8,    # narrower bands — triggers more often
+    rsi_window       = 14,
+    buy_rsi          = 38,     # raised from 32 — less restrictive
+    sell_rsi         = 60,
+    exit_target      = "mid",  # exit at midband (faster exits, more turnover)
     min_hold_bars    = 2,
-    stop_loss_pct    = 0.033, # wider stop 3.3% vs old 1.5%
-    take_profit_pct  = 0.055, # wider TP 5.5% vs old 4%
-    trend_sma_window = 200,
-    trend_buffer_pct = 0.01,
+    stop_loss_pct    = 0.02,   # 2% stop
+    take_profit_pct  = 0.035,  # 3.5% TP
+    trend_sma_window = 50,     # 50-day SMA instead of 200 — computable with available data
+    trend_buffer_pct = 0.005,  # tighter buffer
 )
 
-# ── Watchlist ─────────────────────────────────────────────────────────────────
-# Focused on tickers where mean reversion shows real out-of-sample edge.
-# Priority tier: META, JPM, MSFT — lowest IS/OOS Sharpe degradation in hyperopt.
-# Secondary tier: AMZN, TSLA, NVDA — positive OOS Sharpe but more degradation.
-# Excluded: SPY, QQQ, AAPL, GOOGL — consistently negative/near-zero OOS Sharpe.
-# Still includes full WATCHLIST_SP100 as the universe for the screener scan,
-# but the priority tickers are front-loaded for faster signal detection.
+HYBRID_CORE = ["META", "JPM", "MSFT", "AMZN"]
 
-PRIORITY   = ["META", "JPM", "MSFT"]
-SECONDARY  = ["AMZN", "TSLA", "NVDA"]
-WATCHLIST  = PRIORITY + SECONDARY + [
-    s for s in WATCHLIST_SP100 if s not in PRIORITY + SECONDARY
-]
-
-# ── Scanner ───────────────────────────────────────────────────────────────────
-
-scanner = LiveScanner(
-    strategy        = STRATEGY,
-    watchlist       = WATCHLIST,
-    screen_interval = 900,      # re-scan every 15 minutes
-    warmup_bars     = 5200,     # 200 trading days × 26 bars/day — needed for 200-SMA
-    max_positions   = 5,
-    risk_pct        = 0.01,     # 1% risk per trade (down from 2% — safer)
-    stop_loss_pct   = 0.033,
-    take_profit_pct = 0.055,
+hybrid_scanner = LiveScanner(
+    strategy        = HYBRID_STRATEGY,
+    watchlist       = WATCHLIST_SP100,
+    core_symbols    = HYBRID_CORE,
+    poll_interval   = 900,       # every 15 min
+    screen_interval = 1800,
+    warmup_bars     = 120,       # ~30 hours of 15-min bars
+    max_positions   = 3,
+    risk_pct        = 0.01,
+    stop_loss_pct   = 0.02,
+    take_profit_pct = 0.035,
+    resolution      = "15",
+    confirm_bars    = 1,         # reduced from 2 — signals are fleeting
 )
+
 
 if __name__ == "__main__":
     paper = os.getenv("ALPACA_PAPER", "true").lower() in ("true", "1", "yes")
@@ -106,16 +119,6 @@ if __name__ == "__main__":
     print()
 
     # ── Equity monitor ────────────────────────────────────────────────────────
-    # Runs as a background thread.  Every 60 seconds it polls Alpaca for
-    # account equity and fires alarms if risk limits are breached.
-    #
-    # Alarm thresholds (edit to taste):
-    #   daily_loss_limit_pct = 0.03  → alert if today's loss > 3% of opening equity
-    #   max_drawdown_pct     = 0.06  → alert if equity is > 6% below its peak
-    #
-    # CSV logs are written to equity_logs/equity_log_YYYYMMDD.csv.
-    # Open them in a spreadsheet or the Streamlit dashboard to see your equity curve.
-
     def on_daily_loss(equity: float, loss_pct: float) -> None:
         print(f"\n  DAILY LOSS LIMIT HIT — equity=${equity:,.2f}  loss={loss_pct*100:.1f}%")
         print("  Consider stopping the scanner manually.\n")
@@ -124,7 +127,7 @@ if __name__ == "__main__":
         print(f"\n  MAX DRAWDOWN HIT — equity=${equity:,.2f}  drawdown={dd_pct*100:.1f}%\n")
 
     monitor = EquityMonitor(
-        alpaca_client        = scanner._trader,   # reuse scanner's Alpaca client
+        alpaca_client        = vwap_scanner._trader,
         poll_interval        = 60,
         daily_loss_limit_pct = 0.03,
         max_drawdown_pct     = 0.06,
@@ -134,6 +137,20 @@ if __name__ == "__main__":
     )
     monitor.start()
 
-    scanner.run()   # blocks here until Ctrl-C
+    # ── Launch both scanners ──────────────────────────────────────────────────
+    # VWAP runs in the main thread, Hybrid runs in a daemon thread.
+    hybrid_thread = threading.Thread(
+        target=hybrid_scanner.run,
+        daemon=True,
+        name="hybrid-scanner",
+    )
+    hybrid_thread.start()
+    print("  Hybrid (15-min) scanner started in background thread")
+    print("  VWAP (5-min) scanner starting in main thread...\n")
 
-    monitor.stop()
+    try:
+        vwap_scanner.run()   # blocks here until Ctrl-C
+    except KeyboardInterrupt:
+        print("\nInterrupted — shutting down")
+    finally:
+        monitor.stop()

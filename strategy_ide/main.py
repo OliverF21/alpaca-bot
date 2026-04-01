@@ -47,11 +47,13 @@ from config import DEFAULT_SYMBOL, DEFAULT_UNIVERSE, BACKTEST_UNIVERSES, require
 from data.fetcher import fetch_bars
 from strategies.mean_reversion import MeanReversionStrategy
 from strategies.template import TemplateStrategy
+from strategies.vwap_reversion import VWAPReversionStrategy
 from backtester.engine import run_backtest, aggregate_backtest_results
 from backtester.results import save_backtest
 
 STRATEGIES = {
     "mean_reversion": MeanReversionStrategy,
+    "vwap_reversion": VWAPReversionStrategy,
     "template": TemplateStrategy,
 }
 

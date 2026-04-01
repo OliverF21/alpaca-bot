@@ -204,6 +204,7 @@ def run_backtest_api(req: BacktestRequest):
         from data.fetcher import fetch_bars_range
         from strategies.hybrid_trend_mr import HybridTrendMRStrategy
         from strategies.mean_reversion import MeanReversionStrategy
+        from strategies.vwap_reversion import VWAPReversionStrategy
         from backtester.engine import run_backtest
 
         df = fetch_bars_range(req.symbol, req.start, req.end, resolution=req.resolution)
@@ -214,7 +215,13 @@ def run_backtest_api(req: BacktestRequest):
         if df.empty:
             raise HTTPException(400, "No data returned for that symbol/range.")
 
-        strat = HybridTrendMRStrategy() if req.strategy == "hybrid" else MeanReversionStrategy()
+        _STRAT_MAP = {
+            "hybrid": HybridTrendMRStrategy,
+            "mean_reversion": MeanReversionStrategy,
+            "vwap_reversion": VWAPReversionStrategy,
+        }
+        strat_cls = _STRAT_MAP.get(req.strategy, MeanReversionStrategy)
+        strat = strat_cls()
         result = run_backtest(df, strat, initial_capital=req.initial_capital, risk_pct=req.risk_pct)
 
         bh_ret = (float(df["close"].iloc[-1]) / float(df["close"].iloc[0]) - 1) * 100

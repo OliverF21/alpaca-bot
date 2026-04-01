@@ -109,6 +109,7 @@ class MeanReversionScreener:
         min_price: float         = 5.0,       # exclude penny stocks
         max_candidates: int      = 10,
         lookback_bars: int       = 60,        # 60 x 15m = 15 hours of history
+        resolution: str          = "15",      # bar resolution for data fetching
     ):
         self.watchlist         = [s.upper() for s in watchlist]
         self.bb_window         = bb_window
@@ -119,6 +120,7 @@ class MeanReversionScreener:
         self.min_price         = min_price
         self.max_candidates    = max_candidates
         self.lookback_bars     = lookback_bars
+        self.resolution        = resolution
 
     # ── Data fetch (Finnhub REST — rate-limited) ───────────────────────────────
 
@@ -127,7 +129,7 @@ class MeanReversionScreener:
         try:
             result = fetch_bars_bulk(
                 symbols,
-                resolution="15",
+                resolution=self.resolution,
                 n_bars=self.lookback_bars,
             )
             return {s: df for s, df in result.items() if len(df) >= self.bb_window + self.rsi_window}
