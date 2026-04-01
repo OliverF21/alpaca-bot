@@ -303,26 +303,62 @@ class LiveScanner:
     # ── Order execution ─────────────────────────────────────────────────────
 
     def _qty(self, price: float) -> int:
-        equity    = self._equity()
-        risk_amt  = equity * self.risk_pct
-        stop_dist = price * self.stop_loss_pct
-        return max(int(risk_amt / stop_dist), 1)
+        """
+        Calculate share quantity for entry based on risk management.
+        
+        Risk sizing:
+          qty = risk_amount / (price_drop_per_share)
+          
+        But also respect buying power:
+          qty = min(risk_based_qty, buying_power / price)
+        """
+        try:
+            account = self._trader.get_account()
+            equity = float(account.equity)
+            buying_power = float(account.buying_power)
+        except Exception as e:
+            log.warning(f"Could not fetch account info: {e}")
+            return 0
+        
+        # Risk-based sizing: how many shares can we afford to lose risk_pct of equity?
+        risk_amt = equity * self.risk_pct
+        stop_dist = price * self.stop_loss_pct  # $ per share at stop loss
+        qty_by_risk = max(int(risk_amt / stop_dist), 1) if stop_dist > 0 else 1
+        
+        # Buying power constraint: don't spend more than we have
+        qty_by_bp = int(buying_power / price) if price > 0 else 1
+        
+        # Take the smaller of the two
+        qty = min(qty_by_risk, qty_by_bp)
+        
+        # Safety: never go negative or zero
+        return max(qty, 0)
 
     def _enter(self, symbol: str, price: float):
         qty = self._qty(price)
+        
+        # Safety check: don't place order if qty is 0 or negative
+        if qty <= 0:
+            log.warning(f"  ⚠ SKIP ENTER {symbol}: insufficient buying power or risk calculation failed")
+            return
+        
         sl  = round(price * (1 - self.stop_loss_pct), 2)
         tp  = round(price * (1 + self.take_profit_pct), 2)
         log.info(f"  ▶ ENTER {symbol:<6}  price={price:.2f}  qty={qty}  sl={sl}  tp={tp}")
-        self._trader.submit_order(MarketOrderRequest(
-            symbol        = symbol,
-            qty           = qty,
-            side          = OrderSide.BUY,
-            time_in_force = TimeInForce.DAY,
-            order_class   = "bracket",
-            stop_loss     = {"stop_price": sl},
-            take_profit   = {"limit_price": tp},
-        ))
-        self._position_entry_prices[symbol] = price
+        
+        try:
+            self._trader.submit_order(MarketOrderRequest(
+                symbol        = symbol,
+                qty           = qty,
+                side          = OrderSide.BUY,
+                time_in_force = TimeInForce.DAY,
+                order_class   = "bracket",
+                stop_loss     = {"stop_price": sl},
+                take_profit   = {"limit_price": tp},
+            ))
+            self._position_entry_prices[symbol] = price
+        except Exception as e:
+            log.error(f"  ✗ Order failed for {symbol}: {e}")
 
     def _exit(self, symbol: str, qty: str, current_price: float = float("nan")):
         log.info(f"  ◀ EXIT  {symbol:<6}  qty={qty}")
