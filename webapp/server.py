@@ -48,6 +48,14 @@ _STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
 
+# ── Health Check ──────────────────────────────────────────────────────────────
+
+@app.get("/health")
+def health_check():
+    """Liveness probe for Docker health checks."""
+    return {"status": "ok"}
+
+
 # ── Root ──────────────────────────────────────────────────────────────────────
 
 @app.get("/")

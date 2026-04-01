@@ -1,13 +1,31 @@
+version: '3.8'
+
 services:
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alpaca-bot
     env_file: .env
+    environment:
+      - PYTHONUNBUFFERED=1  # Real-time log output
+      - PYTHONDONTWRITEBYTECODE=1  # No .pyc files
     ports:
-      - "8000:8000"    # web dashboard
+      - "8000:8000"  # FastAPI web dashboard
     volumes:
       - ./logs:/app/logs
       - ./equity_logs:/app/equity_logs
+      - ./backtest_results:/app/backtest_results
+      - ./.env:/app/.env:ro  # Read-only .env
+    working_dir: /app
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     # Override CMD to run specific services:
+    #   docker compose up bot                              # Run all services
     #   docker compose run bot python run_all.py --no-crypto
     #   docker compose run bot python scanner/run_scanner.py

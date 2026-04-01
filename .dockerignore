@@ -7,6 +7,12 @@ logs/
 equity_logs/
 .git/
 .DS_Store
+.pytest_cache/
+.claude/
 strategy_ide/data/cache/
 strategy_ide/backtest_results/
+backtest_results/
 *.parquet
+.vscode/
+README.md
+CLAUDE.md
