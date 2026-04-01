@@ -327,14 +327,28 @@ class LiveScanner:
         stop_dist = price * self.stop_loss_pct  # $ per share at stop loss
         qty_by_risk = max(int(risk_amt / stop_dist), 1) if stop_dist > 0 else 1
         
-        # Buying power constraint: don't spend more than we have
-        qty_by_bp = int(buying_power / price) if price > 0 else 1
+        # Buying power constraint: don't spend more than we have (with 5% buffer for safety)
+        buying_power_buffered = buying_power * 0.95  # Use only 95% of buying power
+        qty_by_bp = int(buying_power_buffered / price) if price > 0 else 1
         
         # Take the smaller of the two
         qty = min(qty_by_risk, qty_by_bp)
         
-        # Safety: never go negative or zero
-        return max(qty, 0)
+        # Safety: never go negative or zero, and ensure minimum viable quantity
+        qty = max(qty, 1)  # At least 1 share
+        
+        # Additional safety: ensure order cost is reasonable (not too small)
+        min_order_value = 100  # Minimum $100 order
+        if qty * price < min_order_value:
+            qty = max(1, int(min_order_value / price))
+        
+        # Debug logging
+        log.info(f"  QTY calc: equity=${equity:,.0f} risk_pct={self.risk_pct:.3f} "
+                f"price=${price:.2f} stop_pct={self.stop_loss_pct:.3f}")
+        log.info(f"  QTY calc: risk_amt=${risk_amt:.0f} stop_dist=${stop_dist:.2f} "
+                f"qty_risk={qty_by_risk} qty_bp={qty_by_bp} final_qty={qty}")
+        
+        return qty
 
     def _enter(self, symbol: str, price: float):
         qty = self._qty(price)
@@ -344,9 +358,22 @@ class LiveScanner:
             log.warning(f"  ⚠ SKIP ENTER {symbol}: insufficient buying power or risk calculation failed")
             return
         
+        # Final safety check: verify order cost against current buying power
+        try:
+            account = self._trader.get_account()
+            current_buying_power = float(account.buying_power)
+            order_cost = qty * price
+            if order_cost > current_buying_power * 0.98:  # Allow 2% buffer
+                log.warning(f"  ⚠ SKIP ENTER {symbol}: order cost ${order_cost:,.0f} > buying power ${current_buying_power:,.0f}")
+                return
+        except Exception as e:
+            log.warning(f"  ⚠ Could not verify buying power for {symbol}: {e}")
+            return
+        
         sl  = round(price * (1 - self.stop_loss_pct), 2)
         tp  = round(price * (1 + self.take_profit_pct), 2)
-        log.info(f"  ▶ ENTER {symbol:<6}  price={price:.2f}  qty={qty}  sl={sl}  tp={tp}")
+        order_cost = qty * price
+        log.info(f"  ▶ ENTER {symbol:<6}  price={price:.2f}  qty={qty}  sl={sl}  tp={tp}  cost=${order_cost:,.0f}")
         
         try:
             self._trader.submit_order(MarketOrderRequest(
