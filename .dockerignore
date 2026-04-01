@@ -1,0 +1,12 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+*.log
+logs/
+equity_logs/
+.git/
+.DS_Store
+strategy_ide/data/cache/
+strategy_ide/backtest_results/
+*.parquet

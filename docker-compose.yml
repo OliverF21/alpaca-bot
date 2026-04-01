@@ -1,0 +1,13 @@
+services:
+  bot:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"    # web dashboard
+    volumes:
+      - ./logs:/app/logs
+      - ./equity_logs:/app/equity_logs
+    restart: unless-stopped
+    # Override CMD to run specific services:
+    #   docker compose run bot python run_all.py --no-crypto
+    #   docker compose run bot python scanner/run_scanner.py
