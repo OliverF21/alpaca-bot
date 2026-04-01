@@ -2,15 +2,17 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# System deps for numpy/pandas compilation + curl for healthcheck + git
+# System deps for numpy/pandas compilation + curl for healthcheck + git + ssh
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ curl git && \
+    gcc g++ curl git ssh && \
     rm -rf /var/lib/apt/lists/*
 
-# Clone the latest code from GitHub using token passed as build arg
-ARG GITHUB_TOKEN
-RUN git clone https://${GITHUB_TOKEN}@github.com/OliverF21/alpaca-bot.git /app && \
-    git config --global --unset-all url.https.insteadOf  # Clean up git config after clone
+# Set up SSH for git operations
+RUN mkdir -p /root/.ssh && \
+    ssh-keyscan -H github.com >> /root/.ssh/known_hosts 2>/dev/null
+
+# Clone the latest code from GitHub using SSH
+RUN git clone git@github.com:OliverF21/alpaca-bot.git /app
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt

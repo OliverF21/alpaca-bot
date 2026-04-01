@@ -5,8 +5,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        - GITHUB_TOKEN=${GITHUB_TOKEN}
     container_name: alpaca-bot
     env_file: .env
     environment:
