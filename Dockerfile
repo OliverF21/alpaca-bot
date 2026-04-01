@@ -7,8 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ curl git && \
     rm -rf /var/lib/apt/lists/*
 
-# Clone the latest code from GitHub
-RUN git clone https://github.com/OliverF21/alpaca-bot.git /app
+# Clone the latest code from GitHub using token passed as build arg
+ARG GITHUB_TOKEN
+RUN git clone https://${GITHUB_TOKEN}@github.com/OliverF21/alpaca-bot.git /app && \
+    git config --global --unset-all url.https.insteadOf  # Clean up git config after clone
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
