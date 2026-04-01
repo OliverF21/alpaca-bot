@@ -136,13 +136,15 @@ class LiveScanner:
         _buy_rsi    = getattr(strategy, "buy_rsi", 40)
 
         self._screener = MeanReversionScreener(
-            watchlist     = self.watchlist,
-            bb_window     = _bb_window,
-            bb_std        = _bb_std,
-            rsi_window    = _rsi_window,
-            max_rsi       = _buy_rsi + 10,   # wider pre-filter for more candidates
-            lookback_bars = self.warmup_bars,
-            resolution    = self.resolution,
+            watchlist       = self.watchlist,
+            bb_window       = _bb_window,
+            bb_std          = _bb_std,
+            rsi_window      = _rsi_window,
+            max_rsi         = _buy_rsi + 15,   # wider pre-filter for more candidates (was +10)
+            min_volume_ratio = 0.8,            # accept stocks with 80% of avg volume (was 1.1)
+            max_candidates   = 20,             # return more candidates per scan (was 10)
+            lookback_bars   = self.warmup_bars,
+            resolution      = self.resolution,
         )
 
         mode = "PAPER" if PAPER else "⚠️  LIVE"

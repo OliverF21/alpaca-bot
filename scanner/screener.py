@@ -182,7 +182,9 @@ class MeanReversionScreener:
                 return None
             if latest["rsi"] > self.max_rsi:
                 return None
-            if latest["close"] >= latest["bb_lower"]:
+            # Allow stocks near the lower band (within 2% of lower band) for more candidates
+            band_tolerance = latest["bb_lower"] * 0.02  # 2% tolerance
+            if latest["close"] >= latest["bb_lower"] + band_tolerance:
                 return None
             if latest["volume"] < latest["vol_sma"] * self.min_volume_ratio:
                 return None
