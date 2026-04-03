@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      ssh:
+        - default
     container_name: alpaca-bot
     env_file: .env
     environment:
