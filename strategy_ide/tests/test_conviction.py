@@ -65,3 +65,102 @@ class TestTrendFollowingConviction:
                     f"Conviction must be in [0, 1], got {entries['conviction'].values}"
                 return
         pytest.skip("No entry signals generated across seeds 42-99")
+
+
+class TestMeanReversionConviction:
+
+    def test_conviction_column_exists(self):
+        from strategies.crypto_mean_reversion import CryptoMeanReversionStrategy
+        strat = CryptoMeanReversionStrategy()
+        df = make_crypto_ohlcv()
+        df = strat.populate_indicators(df)
+        df = strat.generate_signals(df)
+        assert "conviction" in df.columns
+
+    def test_conviction_is_zero_when_no_entry(self):
+        from strategies.crypto_mean_reversion import CryptoMeanReversionStrategy
+        strat = CryptoMeanReversionStrategy()
+        df = make_crypto_ohlcv()
+        df = strat.populate_indicators(df)
+        df = strat.generate_signals(df)
+        no_entry = df[df["signal"] != 1]
+        assert (no_entry["conviction"] == 0.0).all()
+
+    def test_conviction_between_zero_and_one_on_entry(self):
+        from strategies.crypto_mean_reversion import CryptoMeanReversionStrategy
+        strat = CryptoMeanReversionStrategy()
+        for seed in range(42, 100):
+            df = make_crypto_ohlcv(seed=seed)
+            df = strat.populate_indicators(df)
+            df = strat.generate_signals(df)
+            entries = df[df["signal"] == 1]
+            if not entries.empty:
+                assert entries["conviction"].between(0.0, 1.0).all()
+                return
+        pytest.skip("No entry signals generated")
+
+
+class TestBreakoutConviction:
+
+    def test_conviction_column_exists(self):
+        from strategies.crypto_breakout import CryptoBreakoutStrategy
+        strat = CryptoBreakoutStrategy()
+        df = make_crypto_ohlcv()
+        df = strat.populate_indicators(df)
+        df = strat.generate_signals(df)
+        assert "conviction" in df.columns
+
+    def test_conviction_is_zero_when_no_entry(self):
+        from strategies.crypto_breakout import CryptoBreakoutStrategy
+        strat = CryptoBreakoutStrategy()
+        df = make_crypto_ohlcv()
+        df = strat.populate_indicators(df)
+        df = strat.generate_signals(df)
+        no_entry = df[df["signal"] != 1]
+        assert (no_entry["conviction"] == 0.0).all()
+
+    def test_conviction_between_zero_and_one_on_entry(self):
+        from strategies.crypto_breakout import CryptoBreakoutStrategy
+        strat = CryptoBreakoutStrategy()
+        for seed in range(42, 100):
+            df = make_crypto_ohlcv(seed=seed)
+            df = strat.populate_indicators(df)
+            df = strat.generate_signals(df)
+            entries = df[df["signal"] == 1]
+            if not entries.empty:
+                assert entries["conviction"].between(0.0, 1.0).all()
+                return
+        pytest.skip("No entry signals generated")
+
+
+class TestSupertrendConviction:
+
+    def test_conviction_column_exists(self):
+        from strategies.crypto_supertrend import CryptoSupertrendStrategy
+        strat = CryptoSupertrendStrategy()
+        df = make_crypto_ohlcv()
+        df = strat.populate_indicators(df)
+        df = strat.generate_signals(df)
+        assert "conviction" in df.columns
+
+    def test_conviction_is_zero_when_no_entry(self):
+        from strategies.crypto_supertrend import CryptoSupertrendStrategy
+        strat = CryptoSupertrendStrategy()
+        df = make_crypto_ohlcv()
+        df = strat.populate_indicators(df)
+        df = strat.generate_signals(df)
+        no_entry = df[df["signal"] != 1]
+        assert (no_entry["conviction"] == 0.0).all()
+
+    def test_conviction_between_zero_and_one_on_entry(self):
+        from strategies.crypto_supertrend import CryptoSupertrendStrategy
+        strat = CryptoSupertrendStrategy()
+        for seed in range(42, 100):
+            df = make_crypto_ohlcv(seed=seed)
+            df = strat.populate_indicators(df)
+            df = strat.generate_signals(df)
+            entries = df[df["signal"] == 1]
+            if not entries.empty:
+                assert entries["conviction"].between(0.0, 1.0).all()
+                return
+        pytest.skip("No entry signals generated")
