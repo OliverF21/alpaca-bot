@@ -52,10 +52,10 @@ class CryptoSupertrendStrategy(BaseStrategy):
     def __init__(
         self,
         atr_period: int        = 10,       # ATR period for Supertrend calculation
-        multiplier: float      = 3.0,      # ATR multiplier — higher = wider bands = fewer signals
-        vol_filter: bool       = True,     # require volume > vol_sma to enter
+        multiplier: float      = 2.5,      # ATR multiplier — higher = wider bands = fewer signals
+        vol_filter: bool       = False,    # require volume > vol_sma to enter
         vol_sma_period: int    = 20,       # volume SMA period
-        rsi_min: float         = 45.0,     # minimum RSI to enter (momentum filter; 0 = disabled)
+        rsi_min: float         = 40.0,     # minimum RSI to enter (momentum filter; 0 = disabled)
         rsi_period: int        = 14,
         min_hold_bars: int     = 2,        # don't exit the very next bar after entry
         risk_pct: float        = 0.01,
@@ -167,6 +167,20 @@ class CryptoSupertrendStrategy(BaseStrategy):
         # Entry wins on collision
         df.loc[entry, "signal"] = 1
         df.loc[exit_ & ~entry, "signal"] = -1
+
+        # ── Conviction score (0.0–1.0) for Signal Arbitrator ─────────────
+        df["conviction"] = 0.0
+        if entry.any():
+            st_dist = (df.loc[entry, "close"] - df.loc[entry, "supertrend"]) / df.loc[entry, "close"]
+            st_score = (st_dist / 0.05).clip(0.0, 1.0)
+            rsi_score = ((df.loc[entry, "rsi"] - 40.0) / 30.0).clip(0.0, 1.0)
+            dir_series = df["supertrend_dir"]
+            flip_points = (dir_series != dir_series.shift(1)).cumsum()
+            bars_since_flip = dir_series.groupby(flip_points).cumcount()
+            duration_score = (bars_since_flip.loc[entry] / 10.0).clip(0.0, 1.0)
+            df.loc[entry, "conviction"] = (
+                0.4 * st_score + 0.35 * rsi_score + 0.25 * duration_score
+            ).round(4)
 
         # ── Stop: Supertrend line at entry (adaptive ATR stop) ────────────────
         close_at_entry = df.loc[entry, "close"].astype(float)
