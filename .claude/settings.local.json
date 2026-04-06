@@ -16,7 +16,10 @@
       "Bash(python -m pip install -r strategy_ide/requirements.txt fastapi uvicorn yfinance)",
       "Bash(ls /Users/oliver/alpaca-bot/.env* /Users/oliver/alpaca-bot/strategy_ide/.env* /Users/oliver/alpaca-bot/requirements*.txt /Users/oliver/alpaca-bot/pyproject.toml /Users/oliver/alpaca-bot/Pipfile)",
       "Bash(.venv/bin/python -m pytest strategy_ide/tests/test_vwap_strategy.py -v)",
-      "Bash(chmod +x /Users/oliver/alpaca-bot/setup.sh)"
+      "Bash(chmod +x /Users/oliver/alpaca-bot/setup.sh)",
+      "Bash(~/.nvm/versions/node/v22.22.2/bin/node --version)",
+      "Bash(~/.nvm/versions/node/v22.22.2/bin/npx --version)",
+      "Bash(npx skills-installer:*)"
     ]
   }
 }
