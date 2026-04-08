@@ -1,25 +1,16 @@
 """
 scanner/crypto_scanner.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━
-24/7 crypto polling scanner using CryptoMeanReversionStrategy.
+Multi-strategy 24/7 crypto scanner.
 
-Near-clone of LiveScanner with exactly 3 changes for crypto:
+Runs all four crypto strategies in parallel on each pair in the dynamic
+universe, feeds signals into the Signal Arbitrator, and executes the
+top-ranked trades.
 
-  1. No market-hours guard — crypto trades 24/7.
-     Instead: sleep 30 min during the quietest window (02:00–03:59 UTC)
-     to avoid noise during thin liquidity.
-
-  2. Fractional _qty() — returns float instead of int.
-     Crypto positions are sized to 6 decimal places (e.g. 0.001234 BTC).
-
-  3. No int() cast on qty in _enter()/_exit() — MarketOrderRequest accepts
-     float quantities for crypto symbols.
-
-Everything else (confirmation counter, trailing stop, safe reconnect,
-screener thread) is identical to LiveScanner.
-
-Usage:
-    python scanner/run_crypto_scanner.py
+Thread structure:
+  - Main thread: 1h poll loop (fetch → strategies → arbitrator → execute)
+  - Background thread 1: Universe ranker (30-min refresh)
+  - Background thread 2: Position monitor (stop/TP checks every 5 min)
 """
 
 import datetime
@@ -28,7 +19,7 @@ import os
 import sys
 import threading
 import time
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import pytz
 import pandas as pd
@@ -54,7 +45,8 @@ except ImportError:
     from strategies.base_strategy import BaseStrategy
     from data.crypto_fetcher import fetch_crypto_bars, fetch_crypto_bars_bulk
 
-from scanner.crypto_screener import CryptoMeanReversionScreener, CRYPTO_WATCHLIST
+from scanner.crypto_universe import UniverseRanker
+from scanner.signal_arbitrator import SignalArbitrator, COOLDOWN_BARS
 
 log = logging.getLogger(__name__)
 logging.basicConfig(
@@ -70,83 +62,51 @@ PAPER      = os.getenv("ALPACA_PAPER", "true").lower() in ("true", "1", "yes")
 
 class CryptoScanner:
     """
-    24/7 polling scanner for crypto mean reversion.
+    Multi-strategy 24/7 crypto polling scanner.
 
     Parameters
     ----------
-    strategy : BaseStrategy
-        CryptoMeanReversionStrategy (or subclass).
-    watchlist : list[str]
-        Crypto pairs to watch, e.g. ["BTC/USD", "ETH/USD"].
+    strategies : list[BaseStrategy]
+        All crypto strategies to run in parallel on each pair.
     poll_interval : int
-        Seconds between signal checks. Default 3600 (1 hour — matches 1h bars).
-    screen_interval : int
-        Seconds between full watchlist re-scans. Default 7200 (2 hours).
+        Seconds between signal checks (default 3600 = 1h).
     warmup_bars : int
         Historical 1h bars to pre-load per pair.
-    max_positions : int
-        Max concurrent open crypto positions.
-    risk_pct : float
-        Fraction of equity risked per trade.
-    stop_loss_pct : float
-        Hard stop percentage below entry (fallback when ATR unavailable).
-    take_profit_pct : float
-        Take-profit percentage above entry.
+    universe_refresh : int
+        Seconds between universe re-ranking (default 1800 = 30 min).
+    universe_top_k : int
+        Number of top pairs to include in active universe.
     """
 
     def __init__(
         self,
-        strategy: BaseStrategy,
-        watchlist: List[str]    = CRYPTO_WATCHLIST,
-        poll_interval: int      = 3600,
-        screen_interval: int    = 7200,
-        warmup_bars: int        = 100,
-        max_positions: int      = 3,
-        risk_pct: float         = 0.01,
-        stop_loss_pct: float    = 0.04,
-        take_profit_pct: float  = 0.08,
+        strategies: List[BaseStrategy],
+        poll_interval: int   = 3600,
+        warmup_bars: int     = 250,
+        universe_refresh: int = 1800,
+        universe_top_k: int  = 8,
     ):
-        self.strategy        = strategy
-        self.watchlist       = watchlist
+        self.strategies      = strategies
         self.poll_interval   = poll_interval
-        self.screen_interval = screen_interval
         self.warmup_bars     = warmup_bars
-        self.max_positions   = max_positions
-        self.risk_pct        = risk_pct
-        self.stop_loss_pct   = stop_loss_pct
-        self.take_profit_pct = take_profit_pct
 
-        self._cache: Dict[str, pd.DataFrame]     = {}
-        self._active_symbols: List[str]          = []
-        self._entry_confirmation: Dict[str, int] = {}
-        self._position_entry_prices: Dict[str, float] = {}
-        self._daily_pnl: Dict[str, float]        = {}
+        self._cache: Dict[str, pd.DataFrame] = {}
+        self._cooldowns: Dict[str, int]       = {}  # symbol → bars since exit
+        self._position_meta: Dict[str, Dict]  = {}  # symbol → {strategy, stop, tp, trailing}
+        self._daily_pnl: Dict[str, float]     = {}
 
         self._trader = TradingClient(API_KEY, SECRET_KEY, paper=PAPER)
-
-        self._screener = CryptoMeanReversionScreener(
-            watchlist        = self.watchlist,
-            bb_window        = getattr(strategy, "bb_window",  20),
-            bb_std           = getattr(strategy, "bb_std",     2.0),
-            rsi_window       = getattr(strategy, "rsi_window", 14),
-            max_rsi          = getattr(strategy, "buy_rsi",    28) + 7,
-            lookback_bars    = self.warmup_bars,
+        self._ranker = UniverseRanker(
+            refresh_interval=universe_refresh,
+            top_k=universe_top_k,
         )
 
         mode = "PAPER" if PAPER else "LIVE"
-        log.info(f"CryptoScanner ready [{mode}]")
-        log.info(f"  Data source : Alpaca CryptoHistoricalDataClient (1h bars)")
-        log.info(f"  Execution   : Alpaca Trading API")
-        log.info(f"  Watchlist   : {len(self.watchlist)} pairs")
+        log.info(f"CryptoScanner ready [{mode}]  {len(strategies)} strategies")
 
-    # ── CHANGE 1: 24/7 low-volatility sleep instead of market hours guard ────
+    # ── Quiet window ─────────────────────────────────────────────────────────
 
     def _maybe_sleep_quiet_window(self) -> bool:
-        """
-        During 02:00–03:59 UTC (thinnest crypto liquidity), skip the poll
-        and sleep 30 minutes to avoid noise trades.
-        Returns True if sleeping (caller should continue the loop).
-        """
         utc_hour = datetime.datetime.now(pytz.utc).hour
         if utc_hour in (2, 3):
             log.info("Quiet window (02:00–03:59 UTC) — sleeping 30 min")
@@ -154,54 +114,10 @@ class CryptoScanner:
             return True
         return False
 
-    # ── Signal confirmation (identical to LiveScanner) ────────────────────────
+    # ── Portfolio helpers ─────────────────────────────────────────────────────
 
-    def _confirm_signal(self, symbol: str, raw_signal: str) -> str:
-        if raw_signal == "enter":
-            self._entry_confirmation[symbol] = (
-                self._entry_confirmation.get(symbol, 0) + 1
-            )
-            count = self._entry_confirmation[symbol]
-            if count >= 2:
-                return "enter"
-            log.info(f"  {symbol}: entry pending confirmation ({count}/2)")
-            return "hold"
-        self._entry_confirmation[symbol] = 0
-        return raw_signal
-
-    # ── Trailing stop to break-even (identical to LiveScanner) ───────────────
-
-    def _update_trailing_stop(self, symbol: str, position) -> None:
-        try:
-            entry   = float(position.avg_entry_price)
-            current = float(position.current_price)
-            gain    = (current - entry) / entry
-
-            if gain >= self.take_profit_pct / 2:
-                req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
-                for o in self._trader.get_orders(req):
-                    try:
-                        self._trader.cancel_order_by_id(o.id)
-                    except Exception:
-                        pass
-
-                from alpaca.trading.requests import StopOrderRequest
-                # Crypto qty is fractional — do NOT cast to int
-                self._trader.submit_order(StopOrderRequest(
-                    symbol        = symbol,
-                    qty           = abs(float(position.qty)),
-                    side          = OrderSide.SELL,
-                    time_in_force = TimeInForce.GTC,   # GTC: crypto is 24/7
-                    stop_price    = round(entry, 8),
-                ))
-                log.info(
-                    f"  Trailing stop: {symbol} gain={gain*100:.1f}% "
-                    f"→ stop moved to break-even {entry}"
-                )
-        except Exception as e:
-            log.debug(f"  Trailing stop update failed for {symbol}: {e}")
-
-    # ── Safe position fetch (identical to LiveScanner) ────────────────────────
+    def _open_positions(self) -> Dict[str, object]:
+        return {p.symbol: p for p in self._trader.get_all_positions()}
 
     def _safe_open_positions(self) -> Dict[str, object]:
         for attempt in range(3):
@@ -213,7 +129,14 @@ class CryptoScanner:
         log.error("  Could not fetch positions after 3 attempts — skipping poll")
         return {}
 
-    # ── Warmup ────────────────────────────────────────────────────────────────
+    def _equity(self) -> float:
+        return float(self._trader.get_account().equity)
+
+    def _has_pending_order(self, symbol: str) -> bool:
+        req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
+        return len(self._trader.get_orders(req)) > 0
+
+    # ── Data ─────────────────────────────────────────────────────────────────
 
     def _warmup(self, symbols: List[str]):
         log.info(f"Warming up {len(symbols)} crypto pairs...")
@@ -222,75 +145,103 @@ class CryptoScanner:
             self._cache[symbol] = df
             log.info(f"  {symbol}: {len(df)} bars cached")
 
-    # ── Signal evaluation ─────────────────────────────────────────────────────
-
-    def _refresh_and_evaluate(self, symbol: str) -> str:
+    def _refresh_bars(self, symbol: str) -> pd.DataFrame:
         try:
-            df_new = fetch_crypto_bars(symbol, resolution="60", n_bars=self.warmup_bars)
+            df = fetch_crypto_bars(symbol, resolution="60", n_bars=self.warmup_bars)
+            if not df.empty:
+                self._cache[symbol] = df
+            return df
         except Exception as e:
             log.warning(f"  {symbol}: data refresh failed — {e}")
-            return "hold"
+            return self._cache.get(symbol, pd.DataFrame())
 
-        min_bars = getattr(self.strategy, "bb_window", 20) + getattr(self.strategy, "rsi_window", 14)
-        if df_new.empty or len(df_new) < min_bars:
-            return "hold"
+    # ── Strategy evaluation ──────────────────────────────────────────────────
 
-        self._cache[symbol] = df_new
+    def _evaluate_all_strategies(self, symbol: str, df: pd.DataFrame) -> List[Dict]:
+        """Run all strategies on a pair's data, return list of signal dicts."""
+        results = []
+        for strat in self.strategies:
+            try:
+                df_copy = df.copy()
+                df_copy = strat.populate_indicators(df_copy)
+                df_copy = strat.generate_signals(df_copy)
 
-        try:
-            df = self.strategy.populate_indicators(df_new.copy())
-            df = self.strategy.generate_signals(df)
-        except Exception as e:
-            log.debug(f"  {symbol}: strategy error — {e}")
-            return "hold"
+                last = df_copy.iloc[-1]
+                sig_val = int(last["signal"])
+                signal_str = "enter" if sig_val == 1 else "exit" if sig_val == -1 else "hold"
+                conviction = float(last.get("conviction", 0.0))
 
-        sig = int(df["signal"].iloc[-1])
-        return "enter" if sig == 1 else "exit" if sig == -1 else "hold"
+                results.append({
+                    "symbol": symbol,
+                    "signal": signal_str,
+                    "conviction": conviction,
+                    "strategy": strat.name,
+                    "stop_price": float(last.get("stop_price", 0)) if not pd.isna(last.get("stop_price", float("nan"))) else 0,
+                    "take_profit_price": float(last.get("take_profit_price", 0)) if not pd.isna(last.get("take_profit_price", float("nan"))) else 0,
+                    "entry_price": float(last["close"]),
+                })
+            except Exception as e:
+                log.debug(f"  {symbol}/{strat.name}: strategy error — {e}")
+        return results
 
-    # ── Portfolio helpers ─────────────────────────────────────────────────────
+    # ── Order execution ──────────────────────────────────────────────────────
 
-    def _open_positions(self) -> Dict[str, object]:
-        return {p.symbol: p for p in self._trader.get_all_positions()}
-
-    def _equity(self) -> float:
-        return float(self._trader.get_account().equity)
-
-    def _has_pending_order(self, symbol: str) -> bool:
-        req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
-        return len(self._trader.get_orders(req)) > 0
-
-    # ── CHANGE 2: Fractional qty for crypto ───────────────────────────────────
-
-    def _qty(self, price: float) -> float:
-        """
-        Fractional position sizing for crypto.
-        Returns float (e.g. 0.001234 BTC) — NOT rounded to int.
-        """
-        equity    = self._equity()
-        risk_amt  = equity * self.risk_pct
-        stop_dist = price * self.stop_loss_pct
+    def _qty(self, price: float, risk_pct: float, stop_price: float) -> float:
+        equity = self._equity()
+        risk_amt = equity * risk_pct
+        stop_dist = abs(price - stop_price) if stop_price > 0 else price * 0.05
+        stop_dist = max(stop_dist, price * 0.001)  # floor at 0.1%
         return max(round(risk_amt / stop_dist, 6), 0.000001)
 
-    # ── CHANGE 3: No int() cast — float qty for crypto orders ─────────────────
+    def _enter(self, symbol: str, price: float, action: Dict):
+        risk_pct = action["risk_pct"]
+        stop_price = action["stop_price"]
+        tp_price = action["take_profit_price"]
 
-    def _enter(self, symbol: str, price: float):
-        qty = self._qty(price)
-        sl  = round(price * (1 - self.stop_loss_pct), 8)
-        tp  = round(price * (1 + self.take_profit_pct), 8)
-        log.info(f"  ▶ ENTER {symbol:<10}  price={price}  qty={qty}  sl={sl}  tp={tp}")
+        if stop_price <= 0:
+            stop_price = round(price * 0.95, 8)
+        if tp_price <= 0:
+            tp_price = round(price * 1.15, 8)
+
+        qty = self._qty(price, risk_pct, stop_price)
+        sl = round(stop_price, 8)
+        tp = round(tp_price, 8)
+
+        # Cap at 20% of equity
+        max_notional = self._equity() * 0.20
+        if qty * price > max_notional:
+            qty = round(max_notional / price, 6)
+
+        log.info(
+            f"  ▶ ENTER {symbol:<10}  strategy={action['strategy']}  "
+            f"conviction={action['conviction']:.2f}  price={price}  "
+            f"qty={qty}  sl={sl}  tp={tp}  risk={risk_pct*100:.0f}%"
+        )
         self._trader.submit_order(MarketOrderRequest(
             symbol        = symbol,
-            qty           = qty,              # float, not int
+            qty           = qty,
             side          = OrderSide.BUY,
-            time_in_force = TimeInForce.GTC,  # GTC: crypto trades 24/7
+            time_in_force = TimeInForce.GTC,
             order_class   = "bracket",
             stop_loss     = {"stop_price": sl},
             take_profit   = {"limit_price": tp},
         ))
-        self._position_entry_prices[symbol] = price
+
+        # Track position metadata for monitoring
+        use_trailing = (
+            action["conviction"] >= 0.7
+            and action["strategy"] in ("crypto_trend_following", "crypto_breakout")
+        )
+        self._position_meta[symbol] = {
+            "strategy": action["strategy"],
+            "entry_price": price,
+            "stop_price": sl,
+            "take_profit_price": tp,
+            "trailing": use_trailing,
+        }
 
     def _exit(self, symbol: str, qty: str, current_price: float = float("nan")):
-        qty_float = abs(float(qty))          # float, not int
+        qty_float = abs(float(qty))
         log.info(f"  ◀ EXIT  {symbol:<10}  qty={qty_float}")
         self._trader.submit_order(MarketOrderRequest(
             symbol        = symbol,
@@ -298,110 +249,149 @@ class CryptoScanner:
             side          = OrderSide.SELL,
             time_in_force = TimeInForce.GTC,
         ))
-        entry = self._position_entry_prices.pop(symbol, None)
+        entry = self._position_meta.pop(symbol, {}).get("entry_price")
         if entry and not pd.isna(current_price):
             realized = (current_price - entry) * qty_float
-            today    = datetime.date.today().isoformat()
+            today = datetime.date.today().isoformat()
             self._daily_pnl[today] = self._daily_pnl.get(today, 0.0) + realized
             log.info(f"  Daily realized PnL ({today}): ${self._daily_pnl[today]:+.2f}")
 
-    # ── Screener loop ─────────────────────────────────────────────────────────
+        # Start cooldown
+        self._cooldowns[symbol] = 0
 
-    def _screener_loop(self):
+    # ── Position monitor (background thread) ─────────────────────────────────
+
+    def _position_monitor_loop(self):
+        """Check stops/TPs every 5 minutes between polls."""
         while True:
-            time.sleep(self.screen_interval)
+            time.sleep(300)
             try:
-                log.info("─── Re-scanning crypto watchlist ───────────────────")
-                candidates   = self._screener.scan()
-                new_symbols  = [c["symbol"] for c in candidates]
-                if new_symbols:
-                    to_warm = [s for s in new_symbols if s not in self._cache]
-                    if to_warm:
-                        self._warmup(to_warm)
-                    self._active_symbols = new_symbols
-                    log.info(f"Active pairs: {self._active_symbols}")
-            except Exception as e:
-                log.error(f"Crypto screener error: {e}")
+                positions = self._safe_open_positions()
+                positions = {s: p for s, p in positions.items() if "/" in s}
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
+                for symbol, pos in positions.items():
+                    meta = self._position_meta.get(symbol)
+                    if not meta:
+                        continue
+
+                    current = float(pos.current_price)
+                    entry = meta["entry_price"]
+
+                    # Trailing stop for high-conviction trend/breakout entries
+                    if meta["trailing"]:
+                        gain = (current - entry) / entry
+                        if gain >= 0.05:  # 5% gain → start trailing
+                            from strategy_ide.data.crypto_fetcher import fetch_crypto_bars
+                            try:
+                                df = fetch_crypto_bars(symbol, resolution="60", n_bars=20)
+                                if not df.empty:
+                                    import pandas_ta as ta
+                                    atr = ta.atr(df["high"], df["low"], df["close"], length=14)
+                                    if atr is not None and not atr.dropna().empty:
+                                        trail_stop = current - 3.0 * float(atr.dropna().iloc[-1])
+                                        if trail_stop > meta["stop_price"]:
+                                            meta["stop_price"] = trail_stop
+                                            log.info(
+                                                f"  Trailing stop: {symbol} → ${trail_stop:.2f} "
+                                                f"(gain={gain*100:.1f}%)"
+                                            )
+                            except Exception:
+                                pass
+
+            except Exception as e:
+                log.debug(f"Position monitor error: {e}")
+
+    # ── Main poll loop ───────────────────────────────────────────────────────
 
     def _poll(self):
         while True:
-            # CHANGE 1: no market hours guard — sleep briefly during quiet UTC window
             if self._maybe_sleep_quiet_window():
                 continue
 
             log.info("─── Polling crypto signals ─────────────────────────")
 
+            # Tick cooldowns
+            for symbol in list(self._cooldowns):
+                self._cooldowns[symbol] += 1
+
             positions = self._safe_open_positions()
-            # Filter to only crypto positions (symbol contains "/")
             positions = {s: p for s, p in positions.items() if "/" in s}
-            n_open    = len(positions)
+            held: Set[str] = set(positions.keys())
 
-            for symbol in list(self._active_symbols):
-                log.info(f"[{symbol}]")
+            universe = self._ranker.get_universe()
+            # Also include any pair we currently hold
+            all_symbols = list(set(universe) | held)
 
-                price = float("nan")
-                if symbol in self._cache and not self._cache[symbol].empty:
-                    price = float(self._cache[symbol]["close"].iloc[-1])
+            log.info(f"Universe: {universe}")
+            log.info(f"Held: {list(held)}")
 
-                if symbol in positions:
-                    self._update_trailing_stop(symbol, positions[symbol])
+            # Collect signals from all strategies on all pairs
+            all_signals: List[Dict] = []
+            for symbol in all_symbols:
+                df = self._refresh_bars(symbol)
+                if df.empty or len(df) < 50:
+                    continue
 
-                raw_signal = self._refresh_and_evaluate(symbol)
+                signals = self._evaluate_all_strategies(symbol, df)
+                all_signals.extend(signals)
 
-                if symbol in self._cache and not self._cache[symbol].empty:
-                    price = float(self._cache[symbol]["close"].iloc[-1])
+                # Log per-pair summary
+                for sig in signals:
+                    if sig["signal"] != "hold":
+                        log.info(
+                            f"  [{symbol}] {sig['strategy']}: {sig['signal'].upper()} "
+                            f"conviction={sig['conviction']:.2f}"
+                        )
 
-                signal = self._confirm_signal(symbol, raw_signal)
+            # Arbitrate
+            equity = self._equity()
+            arbitrator = SignalArbitrator(account_equity=equity)
+            actions = arbitrator.arbitrate(all_signals, held, self._cooldowns)
 
-                log.info(
-                    f"  price={price:.4g}  raw={raw_signal.upper():<5}  "
-                    f"confirmed={signal.upper():<5}  positions={n_open}/{self.max_positions}"
-                )
-
-                if signal == "enter" and symbol not in positions:
-                    if n_open >= self.max_positions:
-                        log.info(f"  Skipped — max positions reached")
-                    elif self._has_pending_order(symbol):
-                        log.info(f"  Skipped — pending order exists")
-                    else:
-                        self._enter(symbol, price)
-                        n_open += 1
-
-                elif signal == "exit" and symbol in positions:
+            # Execute
+            for action in actions:
+                symbol = action["symbol"]
+                if action["action"] == "exit" and symbol in positions:
+                    price = float(self._cache.get(symbol, pd.DataFrame()).get("close", pd.Series()).iloc[-1]) if symbol in self._cache and not self._cache[symbol].empty else float("nan")
                     self._exit(symbol, positions[symbol].qty, current_price=price)
-
-                else:
-                    log.info(f"  Hold")
+                elif action["action"] == "enter" and symbol not in positions:
+                    if self._has_pending_order(symbol):
+                        log.info(f"  {symbol}: skipped — pending order exists")
+                        continue
+                    price = float(self._cache[symbol]["close"].iloc[-1]) if symbol in self._cache and not self._cache[symbol].empty else action["entry_price"]
+                    self._enter(symbol, price, action)
 
             log.info(f"─── Sleeping {self.poll_interval}s ─────────────────────")
             time.sleep(self.poll_interval)
 
-    # ── Entry point ───────────────────────────────────────────────────────────
+    # ── Entry point ──────────────────────────────────────────────────────────
 
     def run(self):
         mode = "PAPER" if PAPER else "LIVE"
-        log.info(f"\n{'━'*55}")
-        log.info(f"  Crypto Mean Reversion Scanner  [{mode}]  1h bars")
-        log.info(f"  Data  : Alpaca CryptoHistoricalDataClient")
-        log.info(f"  Exec  : Alpaca Trading API")
-        log.info(f"  Polls : every {self.poll_interval}s")
-        log.info(f"  Scans : every {self.screen_interval}s")
-        log.info(f"{'━'*55}\n")
+        strat_names = [s.name for s in self.strategies]
+        log.info(f"\n{'━'*60}")
+        log.info(f"  Multi-Strategy Crypto Scanner  [{mode}]  1h bars")
+        log.info(f"  Strategies : {strat_names}")
+        log.info(f"  Data       : Alpaca CryptoHistoricalDataClient")
+        log.info(f"  Exec       : Alpaca Trading API")
+        log.info(f"  Polls      : every {self.poll_interval}s")
+        log.info(f"{'━'*60}\n")
 
-        log.info("Running initial crypto screen...")
-        candidates           = self._screener.scan()
-        self._active_symbols = [c["symbol"] for c in candidates]
-
-        if self._active_symbols:
-            self._warmup(self._active_symbols)
+        # Initial universe refresh (blocking)
+        log.info("Running initial universe ranking...")
+        self._ranker.refresh_now()
+        universe = self._ranker.get_universe()
+        if universe:
+            self._warmup(universe)
         else:
-            log.info("No initial candidates — screener retries in background")
+            log.info("No initial universe — ranker will retry in background")
+
+        # Start background threads
+        self._ranker.start()
 
         threading.Thread(
-            target=self._screener_loop, daemon=True, name="crypto-screener"
+            target=self._position_monitor_loop, daemon=True, name="position-monitor"
         ).start()
-        log.info("Crypto screener thread started\n")
+        log.info("Position monitor thread started\n")
 
         self._poll()

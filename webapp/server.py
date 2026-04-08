@@ -554,6 +554,32 @@ def run_crypto_screener():
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/crypto/arbitrator")
+async def crypto_arbitrator_status():
+    """Return the latest arbitrator decisions for the dashboard."""
+    try:
+        import glob as _glob
+        log_dir = Path(__file__).parent.parent / "logs"
+        log_files = sorted(_glob.glob(str(log_dir / "crypto*.log")), reverse=True)
+        if not log_files:
+            return {"decisions": [], "universe": [], "message": "No crypto log files found"}
+
+        # Parse last 100 lines for signal/arbitrator data
+        decisions = []
+        universe = []
+        with open(log_files[0], "r") as f:
+            lines = f.readlines()[-100:]
+            for line in lines:
+                if "conviction=" in line and ("ENTER" in line or "EXIT" in line):
+                    decisions.append(line.strip())
+                if "Universe:" in line:
+                    universe = [line.strip()]
+
+        return {"decisions": decisions[-20:], "universe": universe}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Bot logs ──────────────────────────────────────────────────────────────────
 
 _LOG_FILES = {
