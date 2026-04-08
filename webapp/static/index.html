@@ -389,7 +389,7 @@
       <h1>Crypto</h1>
       <button class="btn-refresh" onclick="loadCryptoPositions()">↻ Refresh</button>
     </div>
-    <p class="page-sub">24/7 crypto trading — separate process from equity scanner. Run <code>python scanner/run_crypto_scanner.py</code> to start.</p>
+    <p class="page-sub">Multi-strategy 24/7 crypto trading — 4 strategies with conviction-based signal arbitration. Run <code>python scanner/run_crypto_scanner.py</code> to start.</p>
 
     <!-- Stats row -->
     <div class="stats-row">
@@ -428,28 +428,29 @@
       </div>
     </div>
 
-    <!-- Screener -->
+    <!-- Signal Arbitrator Status -->
     <div class="card glass">
       <div class="card-header">
-        <span class="card-title">Crypto Screener</span>
-        <button class="btn-primary" onclick="runCryptoScreener()">Run Scan</button>
+        <span class="card-title">Signal Arbitrator</span>
+        <button class="btn-primary" onclick="loadArbitratorStatus()">Refresh</button>
       </div>
-      <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 12px">Pairs near lower Bollinger Band with oversold RSI and above-average volume.</p>
-      <div id="crypto-screener-loading" class="loading-state" style="display:none">
-        <div class="spinner"></div> Scanning 12 crypto pairs…
+      <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 12px">Latest decisions from the multi-strategy signal arbitrator — universe ranking, conviction scores, and trade actions.</p>
+      <div id="arb-universe" style="margin-bottom:12px">
+        <span style="color:var(--text-muted);font-size:0.85rem">Universe: </span>
+        <span id="arb-universe-list" style="font-size:0.85rem;color:var(--text-secondary)">—</span>
       </div>
-      <table class="activity-table" id="crypto-screener-table" style="display:none">
+      <div id="arb-decisions-empty" style="color:var(--text-muted);font-size:0.9rem">
+        No recent decisions. Start the scanner to see arbitrator output.
+      </div>
+      <table class="activity-table" id="arb-decisions-table" style="display:none">
         <thead>
           <tr>
-            <th>Pair</th><th>Price</th><th>BB Lower</th>
-            <th>RSI</th><th>Vol Ratio</th><th>Score</th>
+            <th>Time</th><th>Action</th><th>Pair</th>
+            <th>Strategy</th><th>Conviction</th><th>Details</th>
           </tr>
         </thead>
-        <tbody id="crypto-screener-body"></tbody>
+        <tbody id="arb-decisions-body"></tbody>
       </table>
-      <div id="crypto-screener-empty" style="color:var(--text-muted);font-size:0.9rem;display:none">
-        No qualifying setups right now.
-      </div>
     </div>
 
     <!-- Backtest -->
@@ -625,7 +626,7 @@
 
       <div class="card glass">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
-          <span class="card-title">Crypto Scanner (AVAX/USD)</span>
+          <span class="card-title">Crypto Scanner (Multi-Strategy)</span>
           <span id="crypto-log-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-muted)">—</span>
         </div>
         <pre id="crypto-log-output" style="

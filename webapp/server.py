@@ -544,16 +544,6 @@ def run_crypto_compare(req: CryptoCompareRequest):
 
 # ── Crypto: screener ──────────────────────────────────────────────────────────
 
-@app.get("/api/crypto/screener")
-def run_crypto_screener():
-    try:
-        from scanner.crypto_screener import CryptoMeanReversionScreener
-        screener = CryptoMeanReversionScreener()
-        return screener.scan()
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
 @app.get("/api/crypto/arbitrator")
 async def crypto_arbitrator_status():
     """Return the latest arbitrator decisions for the dashboard."""

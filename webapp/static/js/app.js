@@ -542,6 +542,8 @@ async function loadCryptoPositions() {
 
     renderCryptoHoldings(pos);
   } catch(e) { console.error('Crypto positions load error:', e); }
+  // Also load arbitrator status on crypto page load
+  loadArbitratorStatus();
 }
 
 function renderCryptoHoldings(positions) {
@@ -590,44 +592,54 @@ function renderCryptoHoldings(positions) {
   }).join('');
 }
 
-async function runCryptoScreener() {
-  $('crypto-screener-loading').style.display = 'flex';
-  $('crypto-screener-table').style.display   = 'none';
-  $('crypto-screener-empty').style.display   = 'none';
+async function loadArbitratorStatus() {
   try {
-    const results = await api('/api/crypto/screener');
-    $('crypto-screener-loading').style.display = 'none';
-    if (!results.length) {
-      $('crypto-screener-empty').style.display = 'block';
+    const data = await api('/api/crypto/arbitrator');
+    // Universe
+    if (data.universe && data.universe.length) {
+      const raw = data.universe[0];
+      const match = raw.match(/Universe:\s*\[(.+)\]/);
+      $('arb-universe-list').textContent = match ? match[1] : raw;
+    } else {
+      $('arb-universe-list').textContent = 'Not available — scanner not running';
+    }
+    // Decisions
+    if (!data.decisions || !data.decisions.length) {
+      $('arb-decisions-empty').style.display = 'block';
+      $('arb-decisions-table').style.display = 'none';
       return;
     }
-    $('crypto-screener-body').innerHTML = results.map(r => {
-      const score      = r.score || 0;
-      const pct        = Math.min(score * 200, 100);
-      const strength   = score < 0.25 ? 'strong' : score < 0.45 ? 'medium' : 'weak';
-      const scoreColor = score < 0.25 ? 'var(--green)' : score < 0.45 ? '#f0a500' : 'var(--text-3)';
-      return `
-        <tr>
-          <td><strong>${r.symbol}</strong></td>
-          <td>${Number(r.close).toPrecision(6)}</td>
-          <td>${Number(r.bb_lower).toPrecision(6)}</td>
-          <td style="color:var(--green)">${Number(r.rsi).toFixed(1)}</td>
-          <td>${Number(r.vol_ratio).toFixed(2)}x</td>
-          <td>
-            <div class="score-bar">
-              <div class="score-track">
-                <div class="score-fill ${strength}" style="width:${pct}%"></div>
-              </div>
-              <span class="score-num" style="color:${scoreColor}">${score.toFixed(3)}</span>
-            </div>
-          </td>
-        </tr>`;
+    $('arb-decisions-empty').style.display = 'none';
+    $('arb-decisions-body').innerHTML = data.decisions.map(line => {
+      // Parse log lines like: "2026-04-07 12:00:00  INFO  ▶ ENTER BTC/USD  strategy=crypto_trend_following  conviction=0.85..."
+      const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+      const time = timeMatch ? timeMatch[1].split(' ')[1] : '—';
+      const isEnter = line.includes('ENTER');
+      const action = isEnter ? 'ENTER' : 'EXIT';
+      const actionColor = isEnter ? 'var(--green)' : 'var(--red)';
+      const pairMatch = line.match(isEnter ? /ENTER\s+(\S+)/ : /EXIT\s+(\S+)/);
+      const pair = pairMatch ? pairMatch[1] : '—';
+      const stratMatch = line.match(/strategy=(\S+)/);
+      const strat = stratMatch ? stratMatch[1] : '—';
+      const convMatch = line.match(/conviction=([\d.]+)/);
+      const conv = convMatch ? parseFloat(convMatch[1]) : 0;
+      const convColor = conv >= 0.7 ? 'var(--green)' : conv >= 0.4 ? '#f0a500' : 'var(--text-muted)';
+      // Everything after conviction as details
+      const detailMatch = line.match(/conviction=[\d.]+\s+(.*)/);
+      const details = detailMatch ? detailMatch[1].substring(0, 60) : '';
+      return `<tr>
+        <td style="font-family:monospace;font-size:0.8rem">${time}</td>
+        <td style="color:${actionColor};font-weight:600">${action}</td>
+        <td><strong>${pair}</strong></td>
+        <td style="font-size:0.8rem">${strat.replace('crypto_','')}</td>
+        <td style="color:${convColor};font-weight:600">${conv.toFixed(2)}</td>
+        <td style="font-size:0.8rem;color:var(--text-muted)">${details}</td>
+      </tr>`;
     }).join('');
-    $('crypto-screener-table').style.display = 'table';
+    $('arb-decisions-table').style.display = 'table';
   } catch(e) {
-    $('crypto-screener-loading').style.display = 'none';
-    $('crypto-screener-empty').textContent = `Error: ${e.message}`;
-    $('crypto-screener-empty').style.display = 'block';
+    $('arb-decisions-empty').textContent = `Error: ${e.message}`;
+    $('arb-decisions-empty').style.display = 'block';
   }
 }
 
