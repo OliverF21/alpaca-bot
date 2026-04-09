@@ -19,7 +19,12 @@
       "Bash(chmod +x /Users/oliver/alpaca-bot/setup.sh)",
       "Bash(~/.nvm/versions/node/v22.22.2/bin/node --version)",
       "Bash(~/.nvm/versions/node/v22.22.2/bin/npx --version)",
-      "Bash(npx skills-installer:*)"
+      "Bash(npx skills-installer:*)",
+      "Bash(.venv/bin/python -m pytest strategy_ide/tests/test_conviction.py -v)",
+      "Bash(python -m pytest strategy_ide/tests/test_conviction.py -v)",
+      "Bash(python -m pytest strategy_ide/tests/test_backtest.py -v)",
+      "Bash(python3 -c ':*)",
+      "Bash(python -m pytest strategy_ide/tests/test_universe.py -v)"
     ]
   }
 }
