@@ -75,7 +75,7 @@ def get_account():
         return {
             "equity":        equity,
             "last_equity":   last_equity,
-            "cash":          float(a.cash),
+            "cash":          float(a.non_marginable_buying_power),
             "buying_power":  float(a.buying_power),
             "long_mkt":      float(a.long_market_value),
             "daily_pl":      daily_pl,
@@ -152,7 +152,13 @@ def get_equity_log(days: int = 30):
             pass
     if not frames:
         return {"points": [], "summary": {}}
-    df = pd.concat(frames).sort_values("timestamp").drop_duplicates("timestamp")
+    df = pd.concat(frames)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates("timestamp")
+    # Downsample to max 500 points for chart performance
+    if len(df) > 500:
+        step = len(df) // 500
+        df = df.iloc[::step]
     first = float(df["equity"].iloc[0])
     last  = float(df["equity"].iloc[-1])
     peak  = float(df["equity"].max())
