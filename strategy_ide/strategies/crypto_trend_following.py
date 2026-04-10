@@ -48,7 +48,7 @@ class CryptoTrendFollowingStrategy(BaseStrategy):
         fast_ema: int          = 12,
         slow_ema: int          = 26,
         adx_window: int        = 14,
-        adx_threshold: float   = 20.0,     # higher than equity — crypto is noisier
+        adx_threshold: float   = 12.0,     # higher than equity — crypto is noisier
         vol_window: int        = 20,
         atr_window: int        = 14,
         atr_stop_mult: float   = 3.0,      # wider than MR (3× ATR) — trend needs room
@@ -124,6 +124,24 @@ class CryptoTrendFollowingStrategy(BaseStrategy):
         # Entry wins on same-bar collision
         df.loc[entry, "signal"] = 1
         df.loc[exit_ & ~entry, "signal"] = -1
+
+        # ── Conviction score (0.0–1.0) for Signal Arbitrator ─────────────
+        df["conviction"] = 0.0
+        if entry.any():
+            # Component 1: ADX strength — how strong is the trend?
+            # Normalize: ADX 12 → 0.0, ADX 40+ → 1.0
+            adx_score = ((df.loc[entry, "adx"] - 12.0) / 28.0).clip(0.0, 1.0)
+            # Component 2: EMA separation — how far apart are the EMAs?
+            ema_sep = (df.loc[entry, "ema_fast"] - df.loc[entry, "ema_slow"]).abs()
+            ema_pct = ema_sep / df.loc[entry, "close"]
+            ema_score = (ema_pct / 0.03).clip(0.0, 1.0)  # 3% separation → 1.0
+            # Component 3: Volume ratio
+            vol_ratio = df.loc[entry, "volume"] / df.loc[entry, "volume_sma"]
+            vol_score = ((vol_ratio - 1.0) / 2.0).clip(0.0, 1.0)  # 3x vol → 1.0
+            # Weighted sum
+            df.loc[entry, "conviction"] = (
+                0.4 * adx_score + 0.35 * ema_score + 0.25 * vol_score
+            ).round(4)
 
         # ── Stop price: ATR-based (preferred) or percentage fallback ─────────
         close_at_entry = df.loc[entry, "close"].astype(float)

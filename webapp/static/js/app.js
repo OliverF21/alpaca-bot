@@ -31,8 +31,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const today = new Date().toISOString().slice(0,10);
   if ($('bt-end'))  $('bt-end').value  = today;
   if ($('ho-end'))  $('ho-end').value  = today;
-  if ($('cbt-end')) $('cbt-end').value = today;
-  if ($('cho-end')) $('cho-end').value = today;
   loadPortfolio();
 });
 
@@ -542,6 +540,8 @@ async function loadCryptoPositions() {
 
     renderCryptoHoldings(pos);
   } catch(e) { console.error('Crypto positions load error:', e); }
+  // Also load arbitrator status on crypto page load
+  loadArbitratorStatus();
 }
 
 function renderCryptoHoldings(positions) {
@@ -590,265 +590,54 @@ function renderCryptoHoldings(positions) {
   }).join('');
 }
 
-async function runCryptoScreener() {
-  $('crypto-screener-loading').style.display = 'flex';
-  $('crypto-screener-table').style.display   = 'none';
-  $('crypto-screener-empty').style.display   = 'none';
+async function loadArbitratorStatus() {
   try {
-    const results = await api('/api/crypto/screener');
-    $('crypto-screener-loading').style.display = 'none';
-    if (!results.length) {
-      $('crypto-screener-empty').style.display = 'block';
+    const data = await api('/api/crypto/arbitrator');
+    // Universe
+    if (data.universe && data.universe.length) {
+      const raw = data.universe[0];
+      const match = raw.match(/Universe:\s*\[(.+)\]/);
+      $('arb-universe-list').textContent = match ? match[1] : raw;
+    } else {
+      $('arb-universe-list').textContent = 'Not available — scanner not running';
+    }
+    // Decisions
+    if (!data.decisions || !data.decisions.length) {
+      $('arb-decisions-empty').style.display = 'block';
+      $('arb-decisions-table').style.display = 'none';
       return;
     }
-    $('crypto-screener-body').innerHTML = results.map(r => {
-      const score      = r.score || 0;
-      const pct        = Math.min(score * 200, 100);
-      const strength   = score < 0.25 ? 'strong' : score < 0.45 ? 'medium' : 'weak';
-      const scoreColor = score < 0.25 ? 'var(--green)' : score < 0.45 ? '#f0a500' : 'var(--text-3)';
-      return `
-        <tr>
-          <td><strong>${r.symbol}</strong></td>
-          <td>${Number(r.close).toPrecision(6)}</td>
-          <td>${Number(r.bb_lower).toPrecision(6)}</td>
-          <td style="color:var(--green)">${Number(r.rsi).toFixed(1)}</td>
-          <td>${Number(r.vol_ratio).toFixed(2)}x</td>
-          <td>
-            <div class="score-bar">
-              <div class="score-track">
-                <div class="score-fill ${strength}" style="width:${pct}%"></div>
-              </div>
-              <span class="score-num" style="color:${scoreColor}">${score.toFixed(3)}</span>
-            </div>
-          </td>
-        </tr>`;
+    $('arb-decisions-empty').style.display = 'none';
+    $('arb-decisions-body').innerHTML = data.decisions.map(line => {
+      // Parse log lines like: "2026-04-07 12:00:00  INFO  ▶ ENTER BTC/USD  strategy=crypto_trend_following  conviction=0.85..."
+      const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+      const time = timeMatch ? timeMatch[1].split(' ')[1] : '—';
+      const isEnter = line.includes('ENTER');
+      const action = isEnter ? 'ENTER' : 'EXIT';
+      const actionColor = isEnter ? 'var(--green)' : 'var(--red)';
+      const pairMatch = line.match(isEnter ? /ENTER\s+(\S+)/ : /EXIT\s+(\S+)/);
+      const pair = pairMatch ? pairMatch[1] : '—';
+      const stratMatch = line.match(/strategy=(\S+)/);
+      const strat = stratMatch ? stratMatch[1] : '—';
+      const convMatch = line.match(/conviction=([\d.]+)/);
+      const conv = convMatch ? parseFloat(convMatch[1]) : 0;
+      const convColor = conv >= 0.7 ? 'var(--green)' : conv >= 0.4 ? '#f0a500' : 'var(--text-muted)';
+      // Everything after conviction as details
+      const detailMatch = line.match(/conviction=[\d.]+\s+(.*)/);
+      const details = detailMatch ? detailMatch[1].substring(0, 60) : '';
+      return `<tr>
+        <td style="font-family:monospace;font-size:0.8rem">${time}</td>
+        <td style="color:${actionColor};font-weight:600">${action}</td>
+        <td><strong>${pair}</strong></td>
+        <td style="font-size:0.8rem">${strat.replace('crypto_','')}</td>
+        <td style="color:${convColor};font-weight:600">${conv.toFixed(2)}</td>
+        <td style="font-size:0.8rem;color:var(--text-muted)">${details}</td>
+      </tr>`;
     }).join('');
-    $('crypto-screener-table').style.display = 'table';
+    $('arb-decisions-table').style.display = 'table';
   } catch(e) {
-    $('crypto-screener-loading').style.display = 'none';
-    $('crypto-screener-empty').textContent = `Error: ${e.message}`;
-    $('crypto-screener-empty').style.display = 'block';
+    $('arb-decisions-empty').textContent = `Error: ${e.message}`;
+    $('arb-decisions-empty').style.display = 'block';
   }
 }
 
-async function runCryptoBacktest() {
-  const payload = {
-    symbol:     ($('cbt-symbol').value.trim() || 'BTC/USD').toUpperCase(),
-    strategy:   $('cbt-strategy').value,
-    resolution: $('cbt-resolution').value,
-    start:      $('cbt-start').value,
-    end:        $('cbt-end').value,
-  };
-
-  $('cbt-results').style.display = 'none';
-  $('cbt-loading').style.display = 'flex';
-
-  try {
-    const data = await api('/api/crypto/backtest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    $('cbt-loading').style.display = 'none';
-
-    const s     = data.stats;
-    const stRet = (s.total_return_pct * 100).toFixed(2);
-    const bhRet = data.bh_ret.toFixed(2);
-    const vs    = (s.total_return_pct * 100 - data.bh_ret).toFixed(2);
-
-    $('cbt-stats-row').innerHTML = `
-      <div class="bt-stat glass">
-        <div class="bt-stat-label">Strategy Return</div>
-        <div class="bt-stat-value" style="color:${Number(stRet)>=0?'var(--green)':'var(--red)'}">
-          ${Number(stRet)>=0?'+':''}${stRet}%
-        </div>
-      </div>
-      <div class="bt-stat glass">
-        <div class="bt-stat-label">vs Buy &amp; Hold</div>
-        <div class="bt-stat-value" style="color:${Number(vs)>=0?'var(--green)':'var(--red)'}">
-          ${Number(vs)>=0?'+':''}${vs}pp
-        </div>
-        <div class="bt-stat-sub">B&amp;H: ${Number(bhRet)>=0?'+':''}${bhRet}%</div>
-      </div>
-      <div class="bt-stat glass">
-        <div class="bt-stat-label">Sharpe Ratio</div>
-        <div class="bt-stat-value">${s.sharpe_ratio.toFixed(2)}</div>
-      </div>
-      <div class="bt-stat glass">
-        <div class="bt-stat-label">Max Drawdown</div>
-        <div class="bt-stat-value" style="color:var(--red)">${(s.max_drawdown_pct*100).toFixed(1)}%</div>
-      </div>
-      <div class="bt-stat glass">
-        <div class="bt-stat-label">Trades</div>
-        <div class="bt-stat-value">${s.num_trades}</div>
-      </div>`;
-
-    if (data.equity_curve && data.equity_curve.length) {
-      const xs   = data.equity_curve.map(p => p.t);
-      const ys   = data.equity_curve.map(p => p.v);
-      const isPos = s.total_return_pct >= 0;
-      const lc   = isPos ? '#00d4aa' : '#ff5b5b';
-      const fc   = isPos ? 'rgba(0,212,170,0.08)' : 'rgba(255,91,91,0.08)';
-      const initial = ys[0];
-      const bhYs    = ys.map((_, i) => initial * (1 + (data.bh_ret/100) * (i / (ys.length-1))));
-
-      Plotly.react('chart-crypto-backtest', [
-        { x: xs, y: ys, type: 'scatter', mode: 'lines', name: 'Strategy',
-          fill: 'tozeroy', fillcolor: fc, line: { color: lc, width: 2 },
-          hovertemplate: '%{x}<br><b>$%{y:,.0f}</b><extra>Strategy</extra>' },
-        { x: xs, y: bhYs, type: 'scatter', mode: 'lines', name: 'Buy & Hold',
-          line: { color: 'rgba(255,255,255,0.2)', width: 1.5, dash: 'dash' },
-          hovertemplate: '%{x}<br><b>$%{y:,.0f}</b><extra>Buy & Hold</extra>' },
-      ], plotLayout(300), { displayModeBar: false, responsive: true });
-    }
-
-    $('cbt-results').style.display  = 'block';
-    $('cbt-compare').style.display  = 'none';
-  } catch(e) {
-    $('cbt-loading').style.display = 'none';
-    alert(`Crypto backtest error: ${e.message}`);
-  }
-}
-
-async function runCryptoCompare() {
-  const payload = {
-    strategy:   $('cbt-strategy').value,
-    start:      $('cbt-start').value,
-    end:        $('cbt-end').value,
-    resolution: $('cbt-resolution').value,
-  };
-
-  $('cbt-results').style.display  = 'none';
-  $('cbt-compare').style.display  = 'none';
-  $('cbt-loading').style.display  = 'flex';
-  $('cbt-loading-msg').textContent = 'Running strategy on all 12 pairs…';
-
-  try {
-    const data = await api('/api/crypto/compare', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    $('cbt-loading').style.display = 'none';
-
-    const stratLabels = {
-      crypto_mean_reversion: 'Mean Reversion',
-      crypto_trend_following: 'Trend Following',
-      crypto_breakout: 'Breakout',
-    };
-    const rows = data.results;
-    if (!rows || !rows.length) {
-      alert('No results returned.');
-      return;
-    }
-    $('cbt-compare-body').innerHTML = rows.map((r, i) => {
-      const rank = i + 1;
-      const sharpeColor = r.sharpe >= 0.8 ? 'var(--green)' : r.sharpe >= 0.5 ? '#f0a500' : 'var(--red)';
-      const retColor    = r.return_pct >= 0 ? 'var(--green)' : 'var(--red)';
-      const vs          = (r.return_pct - r.bh_ret).toFixed(1);
-      const vsColor     = Number(vs) >= 0 ? 'var(--green)' : 'var(--red)';
-      return `
-        <tr>
-          <td><strong>#${rank} ${r.symbol}</strong></td>
-          <td style="color:${sharpeColor};font-weight:700">${r.sharpe.toFixed(3)}</td>
-          <td style="color:${retColor}">${r.return_pct >= 0 ? '+' : ''}${r.return_pct.toFixed(1)}%</td>
-          <td style="color:${vsColor}">${Number(vs) >= 0 ? '+' : ''}${vs}pp</td>
-          <td style="color:var(--red)">${r.max_drawdown.toFixed(1)}%</td>
-          <td>${r.win_rate.toFixed(1)}%</td>
-          <td>${r.n_trades}</td>
-        </tr>`;
-    }).join('');
-    $('cbt-compare').style.display = 'block';
-  } catch(e) {
-    $('cbt-loading').style.display = 'none';
-    alert(`Compare error: ${e.message}`);
-  }
-}
-
-async function runCryptoHyperopt() {
-  const nEvals = parseInt($('cho-evals').value);
-  $('cho-loading-label').textContent = nEvals;
-  $('cho-results').style.display     = 'none';
-  $('cho-placeholder').style.display = 'none';
-  $('cho-loading').style.display     = 'flex';
-
-  const payload = {
-    symbol:     ($('cho-symbol').value.trim() || 'BTC/USD').toUpperCase(),
-    strategy:   $('cho-strategy').value,
-    resolution: '60',
-    start:      $('cho-start').value,
-    end:        $('cho-end').value,
-    max_evals:  nEvals,
-    train_pct:  parseFloat($('cho-trainpct').value),
-    objective:  'sharpe_ratio',
-  };
-
-  try {
-    const data = await api('/api/hyperopt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    $('cho-loading').style.display = 'none';
-    renderCryptoHyperoptResults(data);
-  } catch(e) {
-    $('cho-loading').style.display     = 'none';
-    $('cho-placeholder').style.display = 'flex';
-    $('cho-placeholder').innerHTML = `<div class="empty-icon">⚠</div><div style="color:var(--red)">${e.message}</div>`;
-  }
-}
-
-function renderCryptoHyperoptResults(data) {
-  $('cho-obj-label').textContent = 'Sharpe Ratio';
-
-  const conv = data.convergence.filter(p => p.best !== null);
-  const trialLosses = data.convergence.map(p => p.loss !== null ? -p.loss : null);
-  const scores      = conv.map(p => -p.best);
-  const trials      = conv.map(p => p.trial);
-
-  const layout = plotLayout(260);
-  layout.yaxis.tickprefix = '';
-  layout.yaxis.title = { text: 'Sharpe Ratio', font: { size: 10 } };
-  layout.xaxis.title = { text: 'Trial', font: { size: 10 } };
-  layout.showlegend  = true;
-
-  Plotly.react('chart-crypto-hyperopt', [
-    { x: data.convergence.map((_,i) => i+1), y: trialLosses, type: 'scatter', mode: 'markers',
-      name: 'Trial score', marker: { color: 'rgba(139,148,158,0.4)', size: 5 },
-      hovertemplate: 'Trial %{x}<br>Score: <b>%{y:.4f}</b><extra></extra>' },
-    { x: trials, y: scores, type: 'scatter', mode: 'lines', name: 'Best so far',
-      line: { color: '#00d4aa', width: 2.5 }, fill: 'tozeroy', fillcolor: 'rgba(0,212,170,0.06)',
-      hovertemplate: 'Trial %{x}<br>Best: <b>%{y:.4f}</b><extra></extra>' },
-  ], layout, { displayModeBar: false, responsive: true });
-
-  const ins = data.in_sample;
-  const oos = data.out_of_sample;
-  const statDef = [
-    { key: 'total_return', label: 'Total Return', fmt: v => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, color: v => v >= 0 ? 'var(--green)' : 'var(--red)' },
-    { key: 'sharpe_ratio', label: 'Sharpe',       fmt: v => v.toFixed(3) },
-    { key: 'max_drawdown', label: 'Max Drawdown', fmt: v => `${v.toFixed(1)}%`, color: () => 'var(--red)' },
-    { key: 'win_rate',     label: 'Win Rate',     fmt: v => `${v.toFixed(1)}%` },
-    { key: 'n_trades',     label: 'Trades',       fmt: v => v },
-  ];
-  $('cho-stats-row').innerHTML = statDef.map(s => {
-    const inV = ins[s.key], ooV = oos[s.key];
-    const inCol = s.color ? s.color(inV) : 'var(--text)';
-    const ooCol = s.color ? s.color(ooV) : 'var(--text)';
-    return `
-      <div class="bt-stat glass">
-        <div class="bt-stat-label">${s.label}</div>
-        <div class="ho-split-vals">
-          <div><div class="ho-split-tag">In-sample</div><div class="bt-stat-value" style="color:${inCol};font-size:15px">${s.fmt(inV)}</div></div>
-          <div class="ho-split-div"></div>
-          <div><div class="ho-split-tag">Out-of-sample</div><div class="bt-stat-value" style="color:${ooCol};font-size:15px">${s.fmt(ooV)}</div></div>
-        </div>
-      </div>`;
-  }).join('');
-
-  $('cho-params-grid').innerHTML = Object.entries(data.best_params).map(([k, v]) => {
-    const display = typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(4) : v;
-    return `<div class="ho-param-item"><div class="ho-param-label">${k}</div><div class="ho-param-value">${display}</div></div>`;
-  }).join('');
-
-  $('cho-results').style.display = 'block';
-}

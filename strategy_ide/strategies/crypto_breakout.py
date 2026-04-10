@@ -48,8 +48,8 @@ class CryptoBreakoutStrategy(BaseStrategy):
 
     def __init__(
         self,
-        channel_window: int    = 24,       # 24 × 1h = 1 trading day lookback
-        vol_mult: float        = 1.5,      # volume must be 1.5× SMA to confirm
+        channel_window: int    = 18,       # 18 × 1h lookback
+        vol_mult: float        = 1.25,     # volume must be 1.25× SMA to confirm
         atr_window: int        = 14,
         atr_stop_mult: float   = 2.0,      # slightly tighter than trend (2× ATR)
         atr_expand_window: int = 14,       # check ATR vs its own SMA for expansion
@@ -128,6 +128,19 @@ class CryptoBreakoutStrategy(BaseStrategy):
         # Entry wins on collision
         df.loc[entry, "signal"] = 1
         df.loc[exit_ & ~entry, "signal"] = -1
+
+        # ── Conviction score (0.0–1.0) for Signal Arbitrator ─────────────
+        df["conviction"] = 0.0
+        if entry.any():
+            breakout_dist = (df.loc[entry, "close"] - df.loc[entry, "donch_high"]) / df.loc[entry, "close"]
+            breakout_score = (breakout_dist / 0.03).clip(0.0, 1.0)
+            atr_ratio = df.loc[entry, "atr"] / df.loc[entry, "atr_sma"]
+            atr_score = ((atr_ratio - 1.0) / 1.0).clip(0.0, 1.0)
+            vol_ratio = df.loc[entry, "volume"] / df.loc[entry, "volume_sma"]
+            vol_score = ((vol_ratio - 1.25) / 2.0).clip(0.0, 1.0)
+            df.loc[entry, "conviction"] = (
+                0.35 * breakout_score + 0.35 * atr_score + 0.30 * vol_score
+            ).round(4)
 
         # ── Stop price: ATR-based or percentage fallback ─────────────────────
         close_at_entry = df.loc[entry, "close"].astype(float)

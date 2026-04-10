@@ -1,0 +1,38 @@
+# Alpaca Bot — runtime dependencies for the Raspberry Pi trading server.
+# Strict subset of requirements.txt: everything needed by run_all.py
+# (equity scanner + crypto scanner + FastAPI dashboard) and nothing else.
+#
+# Drops vs. requirements.txt:
+#   - hyperopt      → lazy-loaded inside /api/hyperopt; endpoint will 500 if
+#                     hit on the Pi, but webapp startup is unaffected. Don't
+#                     run optimization on a Pi 2 anyway.
+#   - streamlit     → only used by strategy_ide/dashboard/app.py, which is a
+#                     separate Streamlit app not started by run_all.py.
+#   - plotly        → only imported by the Streamlit dashboard. The FastAPI
+#                     webapp uses plotly.js via CDN on the frontend.
+#   - mplfinance    → research/notebook charting, not used at runtime.
+#   - pytest        → dev only.
+#
+# This saves ~200+ MB in the venv (streamlit and its transitive deps —
+# altair, pyarrow, watchdog, etc. — are the bulk of the savings).
+
+# Alpaca API (trading + market data)
+alpaca-py>=0.19.0
+
+# Market data (fallback/live scanner)
+yfinance>=0.2.31
+
+# Data & indicators
+pandas>=2.0.0
+pandas-ta>=0.3.14b0
+numpy>=1.24.0
+requests>=2.28.0
+
+# Web dashboard (FastAPI)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.0.0
+
+# Config
+python-dotenv>=1.0.0
+pytz>=2023.3

@@ -75,7 +75,7 @@ def get_account():
         return {
             "equity":        equity,
             "last_equity":   last_equity,
-            "cash":          float(a.cash),
+            "cash":          float(a.non_marginable_buying_power),
             "buying_power":  float(a.buying_power),
             "long_mkt":      float(a.long_market_value),
             "daily_pl":      daily_pl,
@@ -152,7 +152,13 @@ def get_equity_log(days: int = 30):
             pass
     if not frames:
         return {"points": [], "summary": {}}
-    df = pd.concat(frames).sort_values("timestamp").drop_duplicates("timestamp")
+    df = pd.concat(frames)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates("timestamp")
+    # Downsample to max 500 points for chart performance
+    if len(df) > 500:
+        step = len(df) // 500
+        df = df.iloc[::step]
     first = float(df["equity"].iloc[0])
     last  = float(df["equity"].iloc[-1])
     peak  = float(df["equity"].max())
@@ -408,150 +414,32 @@ def get_crypto_positions():
         raise HTTPException(500, str(e))
 
 
-# ── Crypto: backtest ──────────────────────────────────────────────────────────
+# ── Crypto: arbitrator ────────────────────────────────────────────────────────
 
-class CryptoBacktestRequest(BaseModel):
-    symbol:          str   = "BTC/USD"
-    start:           str   = "2022-01-01"
-    end:             str   = "2025-12-31"
-    resolution:      str   = "60"        # 1-hour bars
-    strategy:        str   = "crypto_mean_reversion"
-    initial_capital: float = 100_000
-    risk_pct:        float = 0.01
-
-@app.post("/api/crypto/backtest")
-def run_crypto_backtest_api(req: CryptoBacktestRequest):
+@app.get("/api/crypto/arbitrator")
+async def crypto_arbitrator_status():
+    """Return the latest arbitrator decisions for the dashboard."""
     try:
-        from data.crypto_fetcher import fetch_crypto_bars_range
-        from strategies.crypto_mean_reversion import CryptoMeanReversionStrategy
-        from strategies.crypto_trend_following import CryptoTrendFollowingStrategy
-        from strategies.crypto_breakout import CryptoBreakoutStrategy
-        from strategies.crypto_supertrend import CryptoSupertrendStrategy
-        from backtester.engine import run_backtest
+        import glob as _glob
+        log_dir = Path(__file__).parent.parent / "logs"
+        log_files = sorted(_glob.glob(str(log_dir / "crypto*.log")), reverse=True)
+        if not log_files:
+            return {"decisions": [], "universe": [], "message": "No crypto log files found"}
 
-        _CRYPTO_STRATS = {
-            "crypto_mean_reversion":  CryptoMeanReversionStrategy,
-            "crypto_trend_following": CryptoTrendFollowingStrategy,
-            "crypto_breakout":        CryptoBreakoutStrategy,
-            "crypto_supertrend":      CryptoSupertrendStrategy,
-        }
-        strat_cls = _CRYPTO_STRATS.get(req.strategy, CryptoMeanReversionStrategy)
+        # Parse last 100 lines for signal/arbitrator data
+        decisions = []
+        universe = []
+        with open(log_files[0], "r") as f:
+            lines = f.readlines()[-100:]
+            for line in lines:
+                if "conviction=" in line and ("ENTER" in line or "EXIT" in line):
+                    decisions.append(line.strip())
+                if "Universe:" in line:
+                    universe = [line.strip()]
 
-        df = fetch_crypto_bars_range(req.symbol, req.start, req.end, resolution=req.resolution)
-        df.index = pd.to_datetime(df.index)
-        # No between_time() — crypto trades 24/7
-
-        if df.empty:
-            raise HTTPException(400, "No crypto data returned for that pair/range.")
-
-        strat  = strat_cls()
-        result = run_backtest(df, strat, initial_capital=req.initial_capital, risk_pct=req.risk_pct)
-
-        bh_ret = (float(df["close"].iloc[-1]) / float(df["close"].iloc[0]) - 1) * 100
-
-        eq = result.equity_curve
-        if len(eq) > 500:
-            step = len(eq) // 500
-            eq   = eq.iloc[::step]
-
-        trades = []
-        if not result.trades.empty:
-            for _, row in result.trades.head(200).iterrows():
-                trades.append({
-                    "entry_date":  str(row["entry_date"])[:16],
-                    "exit_date":   str(row["exit_date"])[:16],
-                    "entry_price": round(float(row["entry_price"]), 4),
-                    "exit_price":  round(float(row["exit_price"]), 4),
-                    "pnl":         round(float(row["pnl"]), 2),
-                    "return_pct":  round(float(row["return_pct"]) * 100, 2),
-                })
-
-        return {
-            "stats":  result.stats,
-            "bh_ret": bh_ret,
-            "equity_curve": [
-                {"t": str(ts)[:10], "v": float(v)}
-                for ts, v in zip(eq.index, eq.values)
-            ],
-            "trades": trades,
-        }
-    except HTTPException:
-        raise
+        return {"decisions": decisions[-20:], "universe": universe}
     except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# ── Crypto: compare all pairs ─────────────────────────────────────────────────
-
-class CryptoCompareRequest(BaseModel):
-    strategy:        str   = "crypto_mean_reversion"
-    start:           str   = "2022-01-01"
-    end:             str   = "2025-12-31"
-    resolution:      str   = "60"
-    initial_capital: float = 100_000
-    risk_pct:        float = 0.01
-
-@app.post("/api/crypto/compare")
-def run_crypto_compare(req: CryptoCompareRequest):
-    """Run the same strategy backtest across all 12 crypto pairs, ranked by Sharpe."""
-    try:
-        from data.crypto_fetcher import fetch_crypto_bars_range, fetch_crypto_bars_bulk
-        from strategies.crypto_mean_reversion import CryptoMeanReversionStrategy
-        from strategies.crypto_trend_following import CryptoTrendFollowingStrategy
-        from strategies.crypto_breakout import CryptoBreakoutStrategy
-        from strategies.crypto_supertrend import CryptoSupertrendStrategy
-        from backtester.engine import run_backtest
-        from scanner.crypto_screener import CRYPTO_WATCHLIST
-
-        _strat_map = {
-            "crypto_mean_reversion":  CryptoMeanReversionStrategy,
-            "crypto_trend_following": CryptoTrendFollowingStrategy,
-            "crypto_breakout":        CryptoBreakoutStrategy,
-            "crypto_supertrend":      CryptoSupertrendStrategy,
-        }
-        strat_cls = _strat_map.get(req.strategy, CryptoMeanReversionStrategy)
-
-        rows = []
-        for symbol in CRYPTO_WATCHLIST:
-            try:
-                df = fetch_crypto_bars_range(symbol, req.start, req.end, resolution=req.resolution)
-                df.index = pd.to_datetime(df.index)
-                if df.empty or len(df) < 50:
-                    continue
-                strat  = strat_cls()
-                result = run_backtest(df, strat, initial_capital=req.initial_capital, risk_pct=req.risk_pct)
-                s = result.stats
-                bh_ret = (float(df["close"].iloc[-1]) / float(df["close"].iloc[0]) - 1) * 100
-                rows.append({
-                    "symbol":       symbol,
-                    "sharpe":       round(s["sharpe_ratio"], 3),
-                    "return_pct":   round(s["total_return_pct"] * 100, 2),
-                    "bh_ret":       round(bh_ret, 2),
-                    "max_drawdown": round(s["max_drawdown_pct"] * 100, 2),
-                    "win_rate":     round(s["win_rate"] * 100, 1),
-                    "n_trades":     s["num_trades"],
-                })
-            except Exception:
-                continue
-
-        rows.sort(key=lambda x: x["sharpe"], reverse=True)
-        return {"strategy": req.strategy, "results": rows}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# ── Crypto: screener ──────────────────────────────────────────────────────────
-
-@app.get("/api/crypto/screener")
-def run_crypto_screener():
-    try:
-        from scanner.crypto_screener import CryptoMeanReversionScreener
-        screener = CryptoMeanReversionScreener()
-        return screener.scan()
-    except Exception as e:
-        raise HTTPException(500, str(e))
+        return {"error": str(e)}
 
 
 # ── Bot logs ──────────────────────────────────────────────────────────────────

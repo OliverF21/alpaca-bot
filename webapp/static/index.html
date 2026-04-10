@@ -389,7 +389,7 @@
       <h1>Crypto</h1>
       <button class="btn-refresh" onclick="loadCryptoPositions()">↻ Refresh</button>
     </div>
-    <p class="page-sub">24/7 crypto trading — separate process from equity scanner. Run <code>python scanner/run_crypto_scanner.py</code> to start.</p>
+    <p class="page-sub">Multi-strategy 24/7 crypto trading — 4 strategies with conviction-based signal arbitration. Run <code>python scanner/run_crypto_scanner.py</code> to start.</p>
 
     <!-- Stats row -->
     <div class="stats-row">
@@ -428,174 +428,31 @@
       </div>
     </div>
 
-    <!-- Screener -->
+    <!-- Signal Arbitrator Status -->
     <div class="card glass">
       <div class="card-header">
-        <span class="card-title">Crypto Screener</span>
-        <button class="btn-primary" onclick="runCryptoScreener()">Run Scan</button>
+        <span class="card-title">Signal Arbitrator</span>
+        <button class="btn-primary" onclick="loadArbitratorStatus()">Refresh</button>
       </div>
-      <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 12px">Pairs near lower Bollinger Band with oversold RSI and above-average volume.</p>
-      <div id="crypto-screener-loading" class="loading-state" style="display:none">
-        <div class="spinner"></div> Scanning 12 crypto pairs…
+      <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 12px">Latest decisions from the multi-strategy signal arbitrator — universe ranking, conviction scores, and trade actions.</p>
+      <div id="arb-universe" style="margin-bottom:12px">
+        <span style="color:var(--text-muted);font-size:0.85rem">Universe: </span>
+        <span id="arb-universe-list" style="font-size:0.85rem;color:var(--text-secondary)">—</span>
       </div>
-      <table class="activity-table" id="crypto-screener-table" style="display:none">
+      <div id="arb-decisions-empty" style="color:var(--text-muted);font-size:0.9rem">
+        No recent decisions. Start the scanner to see arbitrator output.
+      </div>
+      <table class="activity-table" id="arb-decisions-table" style="display:none">
         <thead>
           <tr>
-            <th>Pair</th><th>Price</th><th>BB Lower</th>
-            <th>RSI</th><th>Vol Ratio</th><th>Score</th>
+            <th>Time</th><th>Action</th><th>Pair</th>
+            <th>Strategy</th><th>Conviction</th><th>Details</th>
           </tr>
         </thead>
-        <tbody id="crypto-screener-body"></tbody>
+        <tbody id="arb-decisions-body"></tbody>
       </table>
-      <div id="crypto-screener-empty" style="color:var(--text-muted);font-size:0.9rem;display:none">
-        No qualifying setups right now.
-      </div>
     </div>
 
-    <!-- Backtest -->
-    <div class="card glass">
-      <div class="card-header">
-        <span class="card-title">Crypto Backtest</span>
-      </div>
-      <div class="backtest-layout">
-        <div class="backtest-controls card glass" style="padding:16px">
-          <div class="form-group">
-            <label>Strategy</label>
-            <select id="cbt-strategy" class="select-input">
-              <option value="crypto_mean_reversion">Mean Reversion</option>
-              <option value="crypto_trend_following">Trend Following (EMA + ADX)</option>
-              <option value="crypto_breakout">Breakout (Donchian Channel)</option>
-              <option value="crypto_supertrend">Supertrend (ATR Adaptive)</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Pair</label>
-              <input type="text" id="cbt-symbol" class="text-input" value="BTC/USD" placeholder="BTC/USD">
-            </div>
-            <div class="form-group">
-              <label>Bar size</label>
-              <select id="cbt-resolution" class="select-input">
-                <option value="60" selected>1-hour</option>
-                <option value="15">15-min</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Start</label>
-              <input type="date" id="cbt-start" class="text-input" value="2022-01-01">
-            </div>
-            <div class="form-group">
-              <label>End</label>
-              <input type="date" id="cbt-end" class="text-input">
-            </div>
-          </div>
-          <div class="form-row" style="gap:8px">
-            <button class="btn-primary btn-full" onclick="runCryptoBacktest()">Run Backtest</button>
-            <button class="btn-secondary btn-full" onclick="runCryptoCompare()" title="Run selected strategy on all 12 pairs">Compare All Pairs</button>
-          </div>
-        </div>
-        <div id="cbt-results" style="display:none">
-          <div class="stats-row" id="cbt-stats-row"></div>
-          <div class="card glass">
-            <div class="card-header"><span class="card-title">Equity Curve vs Buy &amp; Hold</span></div>
-            <div id="chart-crypto-backtest" class="chart-container"></div>
-          </div>
-        </div>
-      </div>
-      <div id="cbt-loading" class="loading-state" style="display:none">
-        <div class="spinner"></div> <span id="cbt-loading-msg">Running backtest…</span>
-      </div>
-      <!-- Compare all pairs table -->
-      <div id="cbt-compare" style="display:none;margin-top:16px">
-        <div class="card-header" style="padding:0 0 8px"><span class="card-title">All Pairs — Ranked by Sharpe</span></div>
-        <table class="activity-table" id="cbt-compare-table">
-          <thead>
-            <tr>
-              <th>Pair</th><th>Sharpe</th><th>Return %</th>
-              <th>vs B&amp;H</th><th>Max DD</th><th>Win Rate</th><th>Trades</th>
-            </tr>
-          </thead>
-          <tbody id="cbt-compare-body"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Optimize (crypto hyperopt) -->
-    <div class="card glass">
-      <div class="card-header">
-        <span class="card-title">Optimize Crypto Strategy</span>
-      </div>
-      <p style="color:var(--text-muted);font-size:0.85rem;margin:0 0 12px">Bayesian hyperparameter search (TPE). Finds the best parameters for the selected strategy on the chosen pair, then validates on held-out data.</p>
-      <div class="backtest-layout">
-        <div class="backtest-controls card glass" style="padding:16px">
-          <div class="form-group">
-            <label>Strategy</label>
-            <select id="cho-strategy" class="select-input">
-              <option value="crypto_mean_reversion">Mean Reversion</option>
-              <option value="crypto_trend_following">Trend Following</option>
-              <option value="crypto_breakout">Breakout</option>
-              <option value="crypto_supertrend">Supertrend (ATR Adaptive)</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Pair</label>
-              <input type="text" id="cho-symbol" class="text-input" value="BTC/USD" placeholder="BTC/USD">
-            </div>
-            <div class="form-group">
-              <label>Trials</label>
-              <select id="cho-evals" class="select-input">
-                <option value="30">30</option>
-                <option value="50" selected>50</option>
-                <option value="100">100</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Start</label>
-              <input type="date" id="cho-start" class="text-input" value="2021-01-01">
-            </div>
-            <div class="form-group">
-              <label>End</label>
-              <input type="date" id="cho-end" class="text-input">
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Train / Test split</label>
-            <select id="cho-trainpct" class="select-input">
-              <option value="0.70" selected>70 / 30</option>
-              <option value="0.80">80 / 20</option>
-            </select>
-          </div>
-          <button class="btn-primary btn-full" onclick="runCryptoHyperopt()">Run Optimization</button>
-        </div>
-        <div id="cho-results" style="display:none">
-          <div class="card glass">
-            <div class="card-header">
-              <span class="card-title">Convergence</span>
-              <span class="ho-objective-label" id="cho-obj-label"></span>
-            </div>
-            <div id="chart-crypto-hyperopt" class="chart-container"></div>
-          </div>
-          <div class="stats-row" id="cho-stats-row"></div>
-          <div class="card glass">
-            <div class="card-header"><span class="card-title">Best Parameters</span></div>
-            <div id="cho-params-grid" class="ho-params-grid"></div>
-          </div>
-        </div>
-        <div class="backtest-placeholder card glass" id="cho-placeholder">
-          <div class="empty-icon">◈</div>
-          <div>Configure and run crypto optimization</div>
-          <div class="empty-sub">Uses 3 years of hourly data — runs ~2-5 min for 100 trials</div>
-        </div>
-      </div>
-      <div id="cho-loading" class="loading-state" style="display:none">
-        <div class="spinner"></div> Running <span id="cho-loading-label">50</span> trials on crypto…
-      </div>
-    </div>
   </div>
 
   <!-- ── Logs ──────────────────────────────────────────────────────────── -->
@@ -625,7 +482,7 @@
 
       <div class="card glass">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
-          <span class="card-title">Crypto Scanner (AVAX/USD)</span>
+          <span class="card-title">Crypto Scanner (Multi-Strategy)</span>
           <span id="crypto-log-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-muted)">—</span>
         </div>
         <pre id="crypto-log-output" style="

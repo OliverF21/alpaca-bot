@@ -374,7 +374,7 @@ class LiveScanner:
                 symbol        = symbol,
                 qty           = qty,
                 side          = OrderSide.BUY,
-                time_in_force = TimeInForce.DAY,
+                time_in_force = TimeInForce.GTC,
                 order_class   = "bracket",
                 stop_loss     = {"stop_price": sl},
                 take_profit   = {"limit_price": tp},
@@ -451,6 +451,24 @@ class LiveScanner:
                 # the position has gained half the take-profit distance
                 if symbol in positions:
                     self._update_trailing_stop(symbol, positions[symbol])
+
+                # Improvement 5: server-side stop-loss — exit if position has
+                # breached stop-loss %. Bracket stop orders expire at EOD, so
+                # overnight gaps can bypass them. This catches those cases.
+                if symbol in positions:
+                    pos = positions[symbol]
+                    entry_price   = float(pos.avg_entry_price)
+                    current_price = float(pos.current_price)
+                    loss_pct      = (entry_price - current_price) / entry_price
+                    if loss_pct >= self.stop_loss_pct:
+                        log.warning(
+                            f"  ⛔ STOP-LOSS {symbol}: down {loss_pct*100:.2f}% "
+                            f"(entry={entry_price:.2f}, now={current_price:.2f}, "
+                            f"threshold={self.stop_loss_pct*100:.1f}%)"
+                        )
+                        self._exit(symbol, pos.qty, current_price=current_price)
+                        n_open -= 1
+                        continue
 
                 raw_signal = self._refresh_and_evaluate(symbol)
 
