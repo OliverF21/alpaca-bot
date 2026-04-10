@@ -63,7 +63,7 @@ sudo apt-get update -qq
 sudo apt-get install -y -qq \
     python3-venv python3-pip python3-dev \
     git build-essential \
-    libatlas-base-dev gfortran \
+    libopenblas-dev gfortran \
     libffi-dev libssl-dev
 
 # ── 2. Swap ───────────────────────────────────────────────────────────────────
