@@ -26,8 +26,8 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
-from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
+from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus, OrderClass
+from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
 
 _REPO         = os.path.join(os.path.dirname(__file__), "..")
 _STRATEGY_IDE = os.path.join(_REPO, "strategy_ide")
@@ -186,8 +186,7 @@ class CryptoScanner:
 
     # ── Order execution ──────────────────────────────────────────────────────
 
-    def _qty(self, price: float, risk_pct: float, stop_price: float) -> float:
-        equity = self._equity()
+    def _qty(self, price: float, risk_pct: float, stop_price: float, equity: float) -> float:
         risk_amt = equity * risk_pct
         stop_dist = abs(price - stop_price) if stop_price > 0 else price * 0.05
         stop_dist = max(stop_dist, price * 0.001)  # floor at 0.1%
@@ -203,26 +202,33 @@ class CryptoScanner:
         if tp_price <= 0:
             tp_price = round(price * 1.15, 8)
 
-        qty = self._qty(price, risk_pct, stop_price)
+        # Fetch equity once for all calculations
+        equity = self._equity()
+
+        qty = self._qty(price, risk_pct, stop_price, equity)
         sl = round(stop_price, 8)
         tp = round(tp_price, 8)
 
         # Cap at 20% of equity
-        max_notional = self._equity() * 0.20
+        max_notional = equity * 0.20
         if qty * price > max_notional:
             qty = round(max_notional / price, 6)
 
+        # Limit price 0.2% above last close for fast fill (crypto bracket orders require limit entry)
+        limit_price = round(price * 1.002, 8)
+
         log.info(
             f"  ▶ ENTER {symbol:<10}  strategy={action['strategy']}  "
-            f"conviction={action['conviction']:.2f}  price={price}  "
+            f"conviction={action['conviction']:.2f}  price={price}  limit={limit_price}  "
             f"qty={qty}  sl={sl}  tp={tp}  risk={risk_pct*100:.0f}%"
         )
-        self._trader.submit_order(MarketOrderRequest(
+        self._trader.submit_order(LimitOrderRequest(
             symbol        = symbol,
             qty           = qty,
+            limit_price   = limit_price,
             side          = OrderSide.BUY,
             time_in_force = TimeInForce.GTC,
-            order_class   = "bracket",
+            order_class   = OrderClass.BRACKET,
             stop_loss     = {"stop_price": sl},
             take_profit   = {"limit_price": tp},
         ))

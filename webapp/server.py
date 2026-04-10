@@ -10,9 +10,12 @@ Run from repo root:
 import os
 import sys
 import asyncio
+import logging
 from pathlib import Path
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 _REPO = Path(__file__).resolve().parent.parent
 _IDE  = _REPO / "strategy_ide"
@@ -33,7 +36,7 @@ import uvicorn
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import QueryOrderStatus
-from alpaca.trading.requests import GetOrdersRequest
+from alpaca.trading.requests import GetOrdersRequest, GetPortfolioHistoryRequest
 
 _API_KEY    = os.getenv("ALPACA_API_KEY", "")
 _SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
@@ -138,30 +141,65 @@ def get_orders(limit: int = 40):
 
 @app.get("/api/equity-log")
 def get_equity_log(days: int = 30):
-    log_dir = _REPO / "equity_logs"
-    if not log_dir.exists():
-        return {"points": [], "summary": {}}
     cutoff = date.today() - timedelta(days=days)
     frames = []
-    for f in sorted(log_dir.glob("equity_log_*.csv")):
-        try:
-            date_str = f.stem.replace("equity_log_", "")
-            if date.fromisoformat(date_str) >= cutoff:
-                frames.append(pd.read_csv(f, parse_dates=["timestamp"]))
-        except Exception:
-            pass
+
+    # Load local CSV files (higher granularity — 1-minute polls)
+    log_dir = _REPO / "equity_logs"
+    if log_dir.exists():
+        for f in sorted(log_dir.glob("equity_log_*.csv")):
+            try:
+                date_str = f.stem.replace("equity_log_", "")
+                if date.fromisoformat(date_str) >= cutoff:
+                    frames.append(pd.read_csv(f, parse_dates=["timestamp"]))
+            except Exception:
+                pass
+
+    # Always fetch Alpaca portfolio history (1-day bars) as fallback/supplement
+    # This ensures we always have equity data even on fresh install
+    try:
+        hist_req = GetPortfolioHistoryRequest(
+            period="1A",      # 1 year history
+            timeframe="1D",   # 1-day bars
+        )
+        portfolio_hist = _trader.get_portfolio_history(hist_req)
+        if portfolio_hist and hasattr(portfolio_hist, 'timestamp') and hasattr(portfolio_hist, 'equity'):
+            # portfolio_hist.timestamp is list of epoch ints, portfolio_hist.equity is list of floats
+            hist_data = []
+            for ts, eq in zip(portfolio_hist.timestamp or [], portfolio_hist.equity or []):
+                try:
+                    # Convert epoch (seconds or millis) to datetime
+                    # If ts > 1e10, assume millis; else assume seconds
+                    ts_sec = ts / 1000 if ts > 1e10 else ts
+                    dt = datetime.fromtimestamp(ts_sec)
+                    hist_data.append({"timestamp": dt, "equity": float(eq)})
+                except Exception:
+                    pass
+            if hist_data:
+                frames.append(pd.DataFrame(hist_data))
+    except Exception as e:
+        log.warning(f"Could not fetch Alpaca portfolio history: {e}")
+
     if not frames:
         return {"points": [], "summary": {}}
-    df = pd.concat(frames)
+
+    # Merge all data sources
+    df = pd.concat(frames, ignore_index=True)
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
     df = df.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates("timestamp")
+
     # Downsample to max 500 points for chart performance
     if len(df) > 500:
         step = len(df) // 500
         df = df.iloc[::step]
+
+    if df.empty:
+        return {"points": [], "summary": {}}
+
     first = float(df["equity"].iloc[0])
     last  = float(df["equity"].iloc[-1])
     peak  = float(df["equity"].max())
+
     return {
         "points": [
             {"t": str(row["timestamp"]), "v": float(row["equity"])}
