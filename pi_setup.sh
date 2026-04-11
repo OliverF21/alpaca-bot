@@ -153,6 +153,14 @@ fi
 echo "  Installing $REQ_FILE..."
 "$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/$REQ_FILE"
 
+# pandas-ta 0.4+ hard-depends on numba/llvmlite which has no armv7 wheel and
+# won't build from source on Pi. Install it WITHOUT its deps — the strategies
+# only use pure-pandas indicators (bbands, rsi, sma, ema, adx, supertrend,
+# donchian) which work fine without numba. sitecustomize.py sets
+# NUMBA_DISABLE_JIT=1 as an extra safety net.
+echo "  Installing pandas-ta (--no-deps, skipping numba/llvmlite)..."
+"$INSTALL_DIR/.venv/bin/pip" install --no-deps pandas-ta
+
 # Record which requirements file this venv matches, and drop the wheel cache
 # that pip accumulates during install (can be 100-300 MB — pure reclaimable).
 echo "$REQ_FILE" > "$VENV_MARKER"

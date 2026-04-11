@@ -24,7 +24,11 @@ yfinance>=0.2.31
 
 # Data & indicators
 pandas>=2.0.0
-pandas-ta>=0.3.14b0,<0.4        # 0.4+ adds numba/llvmlite hard dep; no armv7 wheel, won't build
+# pandas-ta is installed separately with --no-deps in pi_setup.sh to skip
+# the numba/llvmlite dependency chain (no armv7 wheel, won't build from source).
+# All TA indicators used by the strategies (bbands, rsi, sma, ema, adx,
+# supertrend, donchian) are pure-pandas and work without numba.
+# sitecustomize.py already sets NUMBA_DISABLE_JIT=1.
 numpy>=1.24.0
 requests>=2.28.0
 
