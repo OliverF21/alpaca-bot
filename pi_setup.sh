@@ -153,12 +153,19 @@ fi
 echo "  Installing $REQ_FILE..."
 "$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/$REQ_FILE"
 
-# pandas-ta 0.4+ hard-depends on numba/llvmlite which has no armv7 wheel and
-# won't build from source on Pi. Install it WITHOUT its deps — the strategies
-# only use pure-pandas indicators (bbands, rsi, sma, ema, adx, supertrend,
-# donchian) which work fine without numba. sitecustomize.py sets
-# NUMBA_DISABLE_JIT=1 as an extra safety net.
-echo "  Installing pandas-ta (--no-deps, skipping numba/llvmlite)..."
+# pandas-ta 0.4+ hard-imports numba at module init (pandas_ta/utils/_math.py),
+# and numba has no armv7 wheel + won't build from source on Pi. We handle
+# this at runtime via sitecustomize.py at the repo root, which injects a
+# no-op `numba` stub into sys.modules before any user code runs. That keeps
+# all pandas_ta indicators we use (bbands, rsi, sma, ema, adx, supertrend,
+# donchian, vwap) in pure pandas — no numba required.
+#
+# --no-deps still matters: it stops pip from pulling numba/llvmlite as
+# pandas-ta's declared dependency, which would fail to build on armv7.
+#
+# For sitecustomize.py to take effect, the systemd unit below sets
+# Environment=PYTHONPATH=$INSTALL_DIR so Python's startup site.py sees it.
+echo "  Installing pandas-ta (--no-deps, using sitecustomize numba stub)..."
 "$INSTALL_DIR/.venv/bin/pip" install --no-deps pandas-ta
 
 # Record which requirements file this venv matches, and drop the wheel cache
@@ -189,6 +196,11 @@ Type=simple
 User=$RUN_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
+# PYTHONPATH ensures Python's site.py auto-loads sitecustomize.py from the
+# repo root at interpreter startup — which injects a no-op numba stub so
+# pandas_ta 0.4+ imports cleanly on armv7. Inherited by all subprocess
+# children (scanners + webapp).
+Environment=PYTHONPATH=$INSTALL_DIR
 ExecStart=$INSTALL_DIR/.venv/bin/python -u $BOT_CMD
 Restart=always
 RestartSec=15
