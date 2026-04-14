@@ -49,6 +49,15 @@ from scanner.crypto_universe import UniverseRanker
 from scanner.signal_arbitrator import SignalArbitrator, COOLDOWN_BARS
 
 log = logging.getLogger(__name__)
+
+SIGNAL_LOOKBACK = 3  # scan this many closed bars for non-hold signals
+
+_DIAG_COLS = {
+    "crypto_trend_following": ["close", "ema_fast", "ema_slow", "adx", "atr"],
+    "crypto_mean_reversion":  ["close", "rsi", "bb_pct_b", "bb_lower", "bb_mid", "atr"],
+    "crypto_supertrend":      ["close", "supertrend", "supertrend_dir", "rsi"],
+    "crypto_breakout":        ["close", "donch_high", "donch_mid", "atr", "atr_sma"],
+}
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -157,28 +166,66 @@ class CryptoScanner:
 
     # ── Strategy evaluation ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _log_diagnostics(symbol: str, strat_name: str, row: pd.Series, signal: str):
+        cols = _DIAG_COLS.get(strat_name, ["close"])
+        parts = []
+        for c in cols:
+            v = row.get(c, None)
+            if v is not None and not pd.isna(v):
+                parts.append(f"{c}={v:.4f}" if isinstance(v, float) else f"{c}={v}")
+        log.info(f"  [{symbol}] {strat_name}: {signal.upper()}  {' | '.join(parts)}")
+
     def _evaluate_all_strategies(self, symbol: str, df: pd.DataFrame) -> List[Dict]:
-        """Run all strategies on a pair's data, return list of signal dicts."""
+        """Run all strategies on a pair's data, return list of signal dicts.
+
+        Fix 3: drop the still-forming bar so indicators use closed data only.
+        Fix 1: scan last SIGNAL_LOOKBACK closed bars for a non-hold signal
+               (edge-triggered strategies fire on exactly one bar).
+        Fix 2: log indicator snapshot per strategy even on HOLD.
+        """
         results = []
+        if len(df) < 2:
+            return results
+
+        # Drop the in-progress bar — last row from Alpaca is still forming
+        df_closed = df.iloc[:-1]
+
         for strat in self.strategies:
             try:
-                df_copy = df.copy()
+                df_copy = df_closed.copy()
                 df_copy = strat.populate_indicators(df_copy)
                 df_copy = strat.generate_signals(df_copy)
 
-                last = df_copy.iloc[-1]
-                sig_val = int(last["signal"])
+                # Scan last K closed bars for the most recent non-hold signal
+                lookback = min(SIGNAL_LOOKBACK, len(df_copy))
+                tail = df_copy.iloc[-lookback:]
+                non_hold = tail[tail["signal"] != 0]
+
+                if not non_hold.empty:
+                    sig_row = non_hold.iloc[-1]
+                else:
+                    sig_row = df_copy.iloc[-1]
+
+                sig_val = int(sig_row["signal"])
                 signal_str = "enter" if sig_val == 1 else "exit" if sig_val == -1 else "hold"
-                conviction = float(last.get("conviction", 0.0))
+                conviction = float(sig_row.get("conviction", 0.0))
+
+                # Diagnostic logging on every evaluation (latest closed bar)
+                diag = df_copy.iloc[-1]
+                self._log_diagnostics(symbol, strat.name, diag, signal_str)
+
+                # entry_price uses latest closed bar (what we'd actually buy at)
+                entry_price = float(diag["close"])
 
                 results.append({
                     "symbol": symbol,
                     "signal": signal_str,
                     "conviction": conviction,
                     "strategy": strat.name,
-                    "stop_price": float(last.get("stop_price", 0)) if not pd.isna(last.get("stop_price", float("nan"))) else 0,
-                    "take_profit_price": float(last.get("take_profit_price", 0)) if not pd.isna(last.get("take_profit_price", float("nan"))) else 0,
-                    "entry_price": float(last["close"]),
+                    "stop_price": float(sig_row.get("stop_price", 0)) if not pd.isna(sig_row.get("stop_price", float("nan"))) else 0,
+                    "take_profit_price": float(sig_row.get("take_profit_price", 0)) if not pd.isna(sig_row.get("take_profit_price", float("nan"))) else 0,
+                    "entry_price": entry_price,
                 })
             except Exception as e:
                 log.debug(f"  {symbol}/{strat.name}: strategy error — {e}")
@@ -340,14 +387,6 @@ class CryptoScanner:
 
                 signals = self._evaluate_all_strategies(symbol, df)
                 all_signals.extend(signals)
-
-                # Log per-pair summary
-                for sig in signals:
-                    if sig["signal"] != "hold":
-                        log.info(
-                            f"  [{symbol}] {sig['strategy']}: {sig['signal'].upper()} "
-                            f"conviction={sig['conviction']:.2f}"
-                        )
 
             # Arbitrate
             equity = self._equity()
