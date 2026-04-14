@@ -13,7 +13,7 @@ If `$ARGUMENTS` is non-empty, treat it as the target date (format `YYYY-MM-DD`).
 
 Run `echo "${VAULT_PATH:-}"` first. If set, use that. Otherwise detect the machine:
 
-- `uname -n` contains `MacBook` or similar Mac host → `/Users/oliver/Obsidian Vaults/algotradervault`
+- `uname -n` contains `MacBook` or similar Mac host → `/Users/oliver/Obsidian Vaults/algotrader` (local folder is `algotrader` singular; remote repo is `algotradervault`)
 - Otherwise (Pi / Linux) → `~/algotradervault` (expand with `echo $HOME/algotradervault`)
 
 Verify the path exists and is a git repo. If it doesn't, stop and tell the user the vault isn't cloned on this machine.
