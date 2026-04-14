@@ -49,7 +49,7 @@ class CryptoBreakoutStrategy(BaseStrategy):
     def __init__(
         self,
         channel_window: int    = 18,       # 18 × 1h lookback
-        vol_mult: float        = 1.25,     # volume must be 1.25× SMA to confirm
+        vol_mult: float        = 1.1,      # volume must be 1.1× SMA to confirm
         atr_window: int        = 14,
         atr_stop_mult: float   = 2.0,      # slightly tighter than trend (2× ATR)
         atr_expand_window: int = 14,       # check ATR vs its own SMA for expansion
@@ -106,7 +106,7 @@ class CryptoBreakoutStrategy(BaseStrategy):
         entry = (
             df["close"].gt(df["donch_high"])
             & df["volume"].gt(df["volume_sma"] * self.vol_mult)
-            & df["atr"].gt(df["atr_sma"])   # volatility is expanding
+            & df["atr"].gt(df["atr_sma"] * 0.9)   # volatility not collapsing
             & valid
         )
 
@@ -133,14 +133,14 @@ class CryptoBreakoutStrategy(BaseStrategy):
         df["conviction"] = 0.0
         if entry.any():
             breakout_dist = (df.loc[entry, "close"] - df.loc[entry, "donch_high"]) / df.loc[entry, "close"]
-            breakout_score = (breakout_dist / 0.03).clip(0.0, 1.0)
+            breakout_score = (breakout_dist / 0.01).clip(0.0, 1.0)  # 1% breakout = max
             atr_ratio = df.loc[entry, "atr"] / df.loc[entry, "atr_sma"]
-            atr_score = ((atr_ratio - 1.0) / 1.0).clip(0.0, 1.0)
+            atr_score = (atr_ratio - 0.9).clip(0.0, 1.0)  # aligned with new 0.9 threshold
             vol_ratio = df.loc[entry, "volume"] / df.loc[entry, "volume_sma"]
-            vol_score = ((vol_ratio - 1.25) / 2.0).clip(0.0, 1.0)
+            vol_score = ((vol_ratio - 1.0) / 2.0).clip(0.0, 1.0)  # aligned with lower vol threshold
             df.loc[entry, "conviction"] = (
                 0.35 * breakout_score + 0.35 * atr_score + 0.30 * vol_score
-            ).round(4)
+            ).clip(lower=0.15).round(4)
 
         # ── Stop price: ATR-based or percentage fallback ─────────────────────
         close_at_entry = df.loc[entry, "close"].astype(float)

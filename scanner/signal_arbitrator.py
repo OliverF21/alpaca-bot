@@ -84,6 +84,9 @@ class SignalArbitrator:
                 continue
             filtered.append(sig)
 
+        if enter_candidates and not filtered:
+            log.info("  All enter candidates filtered by cooldown")
+
         filtered.sort(
             key=lambda s: (s["conviction"], _STRATEGY_PRIORITY.get(s["strategy"], 0)),
             reverse=True,
@@ -91,6 +94,8 @@ class SignalArbitrator:
 
         n_held = len(held_positions)
         slots = self.max_positions - n_held
+        if filtered and slots <= 0:
+            log.info(f"  {len(filtered)} candidates but no open slots ({self.max_positions} max, {n_held} held)")
         for sig in filtered[:max(slots, 0)]:
             risk_pct = 0.02 if sig["conviction"] >= 0.7 else 0.01
             actions.append({

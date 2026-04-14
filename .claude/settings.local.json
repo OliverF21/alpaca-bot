@@ -24,7 +24,10 @@
       "Bash(python -m pytest strategy_ide/tests/test_conviction.py -v)",
       "Bash(python -m pytest strategy_ide/tests/test_backtest.py -v)",
       "Bash(python3 -c ':*)",
-      "Bash(python -m pytest strategy_ide/tests/test_universe.py -v)"
+      "Bash(python -m pytest strategy_ide/tests/test_universe.py -v)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(python -c ':*)"
     ]
   }
 }

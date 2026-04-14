@@ -112,11 +112,11 @@ class CryptoMeanReversionStrategy(BaseStrategy):
 
         # Volume confirmation: 1.15× threshold for crypto (24/7 average is inflated)
         bb_band_width = df["bb_upper"] - df["bb_lower"]
-        bb_threshold = df["bb_lower"] + 0.10 * bb_band_width
+        bb_threshold = df["bb_lower"] + 0.25 * bb_band_width
         entry = (
             df["close"].lt(bb_threshold)
             & df["rsi"].lt(self.buy_rsi)
-            & df["volume"].gt(df["volume_sma20"] * 1.15)
+            & df["volume"].gt(df["volume_sma20"] * 1.0)
             & df[required].notna().all(axis=1)
         )
 
@@ -146,14 +146,13 @@ class CryptoMeanReversionStrategy(BaseStrategy):
         # ── Conviction score (0.0–1.0) for Signal Arbitrator ─────────────
         df["conviction"] = 0.0
         if entry.any():
-            rsi_score = ((33.0 - df.loc[entry, "rsi"]) / 23.0).clip(0.0, 1.0)
-            bb_dist = (df.loc[entry, "bb_lower"] - df.loc[entry, "close"]) / df.loc[entry, "close"]
-            bb_score = (bb_dist / 0.05).clip(0.0, 1.0)
+            rsi_score = ((self.buy_rsi - df.loc[entry, "rsi"]).clip(lower=0) / self.buy_rsi).clip(0.0, 1.0)
+            bb_score = (1.0 - df.loc[entry, "bb_pct_b"]).clip(0.0, 1.0)
             vol_ratio = df.loc[entry, "volume"] / df.loc[entry, "volume_sma20"]
-            vol_score = ((vol_ratio - 1.15) / 2.0).clip(0.0, 1.0)
+            vol_score = (vol_ratio / 2.0).clip(0.0, 1.0)
             df.loc[entry, "conviction"] = (
                 0.4 * rsi_score + 0.35 * bb_score + 0.25 * vol_score
-            ).round(4)
+            ).clip(lower=0.15).round(4)
 
         # Stop price: ATR-based adaptive stop (preferred) or percentage fallback
         close_at_entry = df.loc[entry, "close"].astype(float)

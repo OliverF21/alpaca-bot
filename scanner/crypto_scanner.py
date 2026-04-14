@@ -354,6 +354,13 @@ class CryptoScanner:
             except Exception as e:
                 log.debug(f"Position monitor error: {e}")
 
+    @staticmethod
+    def _last_close(cache, symbol, fallback=float("nan")):
+        df = cache.get(symbol)
+        if df is not None and not df.empty and "close" in df.columns:
+            return float(df["close"].iloc[-1])
+        return fallback
+
     # ── Main poll loop ───────────────────────────────────────────────────────
 
     def _poll(self):
@@ -383,6 +390,7 @@ class CryptoScanner:
             for symbol in all_symbols:
                 df = self._refresh_bars(symbol)
                 if df.empty or len(df) < 50:
+                    log.warning(f"  {symbol}: skipped — insufficient bars ({len(df)})")
                     continue
 
                 signals = self._evaluate_all_strategies(symbol, df)
@@ -397,13 +405,13 @@ class CryptoScanner:
             for action in actions:
                 symbol = action["symbol"]
                 if action["action"] == "exit" and symbol in positions:
-                    price = float(self._cache.get(symbol, pd.DataFrame()).get("close", pd.Series()).iloc[-1]) if symbol in self._cache and not self._cache[symbol].empty else float("nan")
+                    price = self._last_close(self._cache, symbol)
                     self._exit(symbol, positions[symbol].qty, current_price=price)
                 elif action["action"] == "enter" and symbol not in positions:
                     if self._has_pending_order(symbol):
                         log.info(f"  {symbol}: skipped — pending order exists")
                         continue
-                    price = float(self._cache[symbol]["close"].iloc[-1]) if symbol in self._cache and not self._cache[symbol].empty else action["entry_price"]
+                    price = self._last_close(self._cache, symbol, fallback=action["entry_price"])
                     self._enter(symbol, price, action)
 
             log.info(f"─── Sleeping {self.poll_interval}s ─────────────────────")
