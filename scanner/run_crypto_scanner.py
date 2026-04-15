@@ -35,8 +35,6 @@ except ImportError:
     from strategies.crypto_supertrend import CryptoSupertrendStrategy
 
 from scanner.crypto_scanner import CryptoScanner
-from strategy_ide.monitor.equity_monitor import EquityMonitor
-from pathlib import Path
 
 log = logging.getLogger(__name__)
 logging.basicConfig(
@@ -112,31 +110,8 @@ if __name__ == "__main__":
     print()
 
     # ── Equity monitor ────────────────────────────────────────────────────────
-    def on_daily_loss(equity: float, loss_pct: float) -> None:
-        log.warning(
-            f"DAILY LOSS ALERT  equity=${equity:,.2f}  loss={loss_pct*100:.1f}%"
-        )
-
-    def on_drawdown(equity: float, dd_pct: float) -> None:
-        log.warning(
-            f"DRAWDOWN ALERT  equity=${equity:,.2f}  drawdown={dd_pct*100:.1f}%"
-        )
-
-    monitor = EquityMonitor(
-        alpaca_client        = scanner._trader,
-        poll_interval        = 60,
-        daily_loss_limit_pct = 0.05,
-        max_drawdown_pct     = 0.15,
-        on_daily_loss_breach = on_daily_loss,
-        on_drawdown_breach   = on_drawdown,
-        log_dir              = Path("equity_logs"),
-    )
-    monitor.start()
-    log.info("Equity monitor started")
-
+    # Equity monitor now runs as its own service (run_equity_monitor.py / issue #10)
     try:
         scanner.run()
     except KeyboardInterrupt:
         log.info("Interrupted — shutting down")
-    finally:
-        monitor.stop()

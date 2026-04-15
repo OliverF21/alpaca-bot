@@ -178,6 +178,7 @@ class HybridTrendMRStrategy(BaseStrategy):
         df["signal"]            = 0
         df["stop_price"]        = float("nan")
         df["take_profit_price"] = float("nan")
+        df["reason"]            = ""
 
         required = ["bb_upper", "bb_mid", "bb_lower", "rsi", "volume_sma20", "in_uptrend"]
         missing  = [c for c in required if c not in df.columns]
@@ -198,7 +199,8 @@ class HybridTrendMRStrategy(BaseStrategy):
             df["close"].ge(df["bb_upper"]) if self.exit_target == "upper"
             else df["close"].ge(df["bb_mid"])
         )
-        base_exit = exit_bb | df["rsi"].gt(self.sell_rsi)
+        rsi_over  = df["rsi"].gt(self.sell_rsi)
+        base_exit = exit_bb | rsi_over
 
         # Vectorized min_hold_bars protection
         entry_int = entry.astype(int)
@@ -219,6 +221,14 @@ class HybridTrendMRStrategy(BaseStrategy):
         close_at_entry = df.loc[entry, "close"].astype(float)
         df.loc[entry, "stop_price"]        = (close_at_entry * (1 - self.stop_loss_pct)).round(2)
         df.loc[entry, "take_profit_price"] = (close_at_entry * (1 + self.take_profit_pct)).round(2)
+
+        # Populate reason column for observability (issue #3)
+        bb_label    = "bb_upper_touch" if self.exit_target == "upper" else "bb_mid_touch"
+        exit_rows   = exit_ & ~entry
+        df.loc[entry, "reason"] = "bb_lower+rsi_oversold"
+        df.loc[exit_rows & exit_bb & ~rsi_over, "reason"] = bb_label
+        df.loc[exit_rows & ~exit_bb & rsi_over, "reason"] = "rsi_overbought"
+        df.loc[exit_rows & exit_bb & rsi_over, "reason"]  = f"{bb_label}+rsi_overbought"
 
         return df
 

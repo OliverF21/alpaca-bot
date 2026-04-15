@@ -9,18 +9,25 @@ Alpaca Bot is a Python trading system that runs live equity and crypto scanners 
 ## Commands
 
 ```bash
-# Run everything (equity scanner + crypto scanner + web dashboard)
+# Run everything (equity monitor + equity scanner + crypto scanner + web dashboard)
 python run_all.py
 
 # Run selectively
 python run_all.py --no-crypto      # equity + web only
 python run_all.py --no-equity      # crypto + web (weekend mode)
 python run_all.py --no-web         # scanners only
+python run_all.py --no-monitor     # skip standalone equity monitor
 
 # Run individual services
+python scanner/run_equity_monitor.py   # equity monitor (always-on, 60s polls)
 python scanner/run_scanner.py          # equity scanner (15-min, NYSE hours)
 python scanner/run_crypto_scanner.py   # crypto scanner (1h, 24/7)
 python webapp/server.py                # web dashboard on :8000
+
+# macOS auto-start (launchd)
+./macos_setup.sh                       # install + start as LaunchAgent
+./macos_setup.sh status                # check if running
+./macos_setup.sh uninstall             # stop + remove
 
 # Backtest via CLI
 cd strategy_ide
@@ -33,7 +40,7 @@ python -m pytest strategy_ide/tests/ -v
 
 ## Architecture
 
-**Orchestrator** — `run_all.py` manages all three services as subprocesses with auto-restart and exponential backoff. Logs to `logs/`. Legacy logs mirrored to `/tmp/bot_logs/` for the dashboard.
+**Orchestrator** — `run_all.py` manages four services as subprocesses with auto-restart and exponential backoff. Logs to `logs/`. Legacy logs mirrored to `/tmp/bot_logs/` for the dashboard. On macOS, `macos_setup.sh` installs a LaunchAgent that keeps `run_all.py` alive across reboots/crashes.
 
 **Scanner layer** (`scanner/`):
 - `live_scanner.py` — 15-min polling loop for equities. Fetches bars via Alpaca/yfinance, evaluates strategy signals, submits orders via Alpaca Trading API. Background thread re-runs screener periodically.

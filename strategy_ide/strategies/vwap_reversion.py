@@ -117,6 +117,7 @@ class VWAPReversionStrategy(BaseStrategy):
         df["signal"]            = 0
         df["stop_price"]        = np.nan
         df["take_profit_price"] = np.nan
+        df["reason"]            = ""
 
         required = ["vwap", "vwap_lower", "rsi", "vwap_std", "bar_of_day"]
         missing = [c for c in required if c not in df.columns]
@@ -135,10 +136,9 @@ class VWAPReversionStrategy(BaseStrategy):
         )
 
         # Exit: price returns to VWAP or RSI recovers
-        exit_ = (
-            df["close"].ge(df["vwap"])
-            | df["rsi"].gt(self.sell_rsi)
-        )
+        vwap_touch = df["close"].ge(df["vwap"])
+        rsi_over   = df["rsi"].gt(self.sell_rsi)
+        exit_      = vwap_touch | rsi_over
 
         # Entry wins on collision bar
         df.loc[entry, "signal"] = 1
@@ -152,6 +152,13 @@ class VWAPReversionStrategy(BaseStrategy):
         df.loc[entry, "take_profit_price"] = (
             close_at_entry * (1 + self.take_profit_pct)
         ).round(2)
+
+        # Populate reason column for observability (issue #3)
+        exit_rows = exit_ & ~entry
+        df.loc[entry, "reason"] = "vwap_lower+rsi_oversold"
+        df.loc[exit_rows & vwap_touch & ~rsi_over, "reason"] = "vwap_touch"
+        df.loc[exit_rows & ~vwap_touch & rsi_over, "reason"] = "rsi_overbought"
+        df.loc[exit_rows & vwap_touch & rsi_over, "reason"]  = "vwap_touch+rsi_overbought"
 
         return df
 

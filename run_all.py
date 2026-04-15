@@ -32,6 +32,12 @@ _REPO = Path(__file__).resolve().parent
 
 ALL_SERVICES = [
     ServiceConfig(
+        name="monitor",
+        cmd=[sys.executable, "scanner/run_equity_monitor.py"],
+        log_stem="equity_monitor",
+        legacy_log=None,
+    ),
+    ServiceConfig(
         name="equity",
         cmd=[sys.executable, "scanner/run_scanner.py"],
         log_stem="equity_scanner",
@@ -234,16 +240,18 @@ def shutdown(services: list[ServiceProcess]):
 
 def main():
     parser = argparse.ArgumentParser(description="Alpaca Bot — perpetual service runner")
-    parser.add_argument("--no-equity", action="store_true", help="Skip equity scanner")
-    parser.add_argument("--no-crypto", action="store_true", help="Skip crypto scanner")
-    parser.add_argument("--no-web",    action="store_true", help="Skip web dashboard")
+    parser.add_argument("--no-monitor", action="store_true", help="Skip standalone equity monitor")
+    parser.add_argument("--no-equity",  action="store_true", help="Skip equity scanner")
+    parser.add_argument("--no-crypto",  action="store_true", help="Skip crypto scanner")
+    parser.add_argument("--no-web",     action="store_true", help="Skip web dashboard")
     args = parser.parse_args()
 
     active_cfgs = [
         s for s in ALL_SERVICES if not (
-            (s.name == "equity" and args.no_equity) or
-            (s.name == "crypto" and args.no_crypto) or
-            (s.name == "web"    and args.no_web)
+            (s.name == "monitor" and args.no_monitor) or
+            (s.name == "equity"  and args.no_equity) or
+            (s.name == "crypto"  and args.no_crypto) or
+            (s.name == "web"     and args.no_web)
         )
     ]
     if not active_cfgs:

@@ -305,20 +305,6 @@ body { display: flex; overflow: hidden; }
 .badge-buy  { background: var(--green-dim); color: var(--green); }
 .badge-sell { background: var(--red-dim);   color: var(--red);   }
 
-/* ── Screener ─────────────────────────────────────────────────────────── */
-.score-bar {
-  display: flex; align-items: center; gap: 8px;
-}
-.score-track {
-  flex: 1; height: 4px; background: var(--border);
-  border-radius: 2px; overflow: hidden;
-}
-.score-fill { height: 100%; border-radius: 2px; transition: width 0.4s; }
-.score-fill.strong { background: var(--green); }
-.score-fill.medium { background: #f0a500; }
-.score-fill.weak   { background: var(--text-3); }
-.score-num { font-size: 12px; font-weight: 600; width: 34px; text-align: right; }
-
 /* ── Backtest layout ──────────────────────────────────────────────────── */
 .backtest-layout { display: grid; grid-template-columns: 280px 1fr; gap: 20px; align-items: start; }
 .backtest-controls { padding: 24px; }
@@ -385,49 +371,6 @@ body { display: flex; overflow: hidden; }
 .bt-stat-label { font-size: 11px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 6px; }
 .bt-stat-value { font-size: 22px; font-weight: 700; }
 .bt-stat-sub { font-size: 11px; color: var(--text-3); margin-top: 3px; }
-
-/* ── Hyperopt ─────────────────────────────────────────────────────────── */
-.ho-objective-label {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
-  color: var(--green); background: var(--green-dim);
-  padding: 3px 10px; border-radius: 20px;
-  text-transform: uppercase;
-}
-
-/* In-sample / out-of-sample split inside stat card */
-.ho-split-vals {
-  display: flex; align-items: stretch; gap: 0;
-  margin-top: 6px;
-}
-.ho-split-div {
-  width: 1px; background: var(--border); margin: 0 16px; flex-shrink: 0;
-}
-.ho-split-tag {
-  font-size: 10px; color: var(--text-3); text-transform: uppercase;
-  letter-spacing: 0.5px; margin-bottom: 4px;
-}
-
-/* Best params grid */
-.ho-params-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
-  padding: 16px;
-}
-.ho-param-item {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-}
-.ho-param-label {
-  font-size: 11px; color: var(--text-3); text-transform: uppercase;
-  letter-spacing: 0.5px; margin-bottom: 4px;
-}
-.ho-param-value {
-  font-size: 17px; font-weight: 700; color: var(--green);
-  font-variant-numeric: tabular-nums;
-}
 
 /* ── Crypto page ─────────────────────────────────────────────────── */
 .market-open-badge {

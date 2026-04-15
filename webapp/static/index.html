@@ -32,17 +32,9 @@
       <svg viewBox="0 0 24 24"><path d="M13 2.05v2.02c3.95.49 7 3.85 7 7.93 0 3.21-1.81 6.01-4.72 7.72L13 17v5h5l-1.22-1.22C19.91 19.07 22 15.76 22 12c0-5.18-3.95-9.45-9-9.95zM11 2.05C5.95 2.55 2 6.82 2 12c0 3.76 2.09 7.07 5.22 8.78L6 22h5v-5l-2.28 2.28C7.06 17.81 6 14.89 6 12c0-3.93 2.77-7.22 5-7.95V2.05z"/></svg>
       Activity
     </a>
-    <a class="nav-item" data-page="screener" onclick="navigate('screener')">
-      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-      Screener
-    </a>
     <a class="nav-item" data-page="backtest" onclick="navigate('backtest')">
       <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
       Backtest
-    </a>
-    <a class="nav-item" data-page="hyperopt" onclick="navigate('hyperopt')">
-      <svg viewBox="0 0 24 24"><path d="M19.4 13c.04-.32.06-.66.06-1s-.02-.68-.07-1l2.16-1.68c.19-.15.24-.42.12-.64l-2.04-3.53c-.12-.22-.38-.3-.6-.22l-2.55 1.02c-.52-.4-1.08-.74-1.69-.98L14.34 2.9c-.04-.24-.24-.4-.49-.4h-4.08c-.25 0-.44.16-.48.39l-.38 2.57c-.61.24-1.17.58-1.69.98L4.67 5.42c-.23-.08-.49 0-.6.22L2.03 9.17c-.12.22-.07.49.12.64L4.3 11.5c-.05.32-.07.65-.07 1s.02.68.07 1L2.15 15.18c-.19.15-.24.42-.12.64l2.04 3.53c.12.22.38.3.6.22l2.55-1.02c.52.4 1.08.74 1.69.98l.38 2.57c.04.23.23.39.48.39h4.08c.25 0 .44-.16.49-.39l.38-2.57c.61-.24 1.17-.58 1.69-.98l2.55 1.02c.23.08.49 0 .6-.22l2.04-3.53c.12-.22.07-.49-.12-.64L19.4 13zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
-      Optimize
     </a>
     <a class="nav-item" data-page="crypto" onclick="navigate('crypto')">
       <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-1.11-.64-1.87-2.22-1.87-1.5 0-2.4.68-2.4 1.64 0 .84.65 1.39 2.67 1.91s4.18 1.39 4.18 3.91c-.01 1.83-1.38 2.83-3.12 3.16z"/></svg>
@@ -159,36 +151,6 @@
     </div>
   </div>
 
-  <!-- SCREENER PAGE -->
-  <div id="page-screener" class="page">
-    <div class="page-header">
-      <h1>Screener</h1>
-      <div class="header-controls">
-        <select class="select-input" id="screener-universe">
-          <option value="sp100">S&amp;P 100</option>
-          <option value="etfs">Sector ETFs</option>
-          <option value="largecap">Large Cap</option>
-        </select>
-        <button class="btn-primary" onclick="runScreener()">Run Scan</button>
-      </div>
-    </div>
-    <p class="page-sub">Stocks currently showing mean-reversion setups. Green = strongest signal.</p>
-    <div id="screener-loading" class="loading-state" style="display:none">
-      <div class="spinner"></div> Scanning universe…
-    </div>
-    <div class="card glass" id="screener-card" style="display:none">
-      <table class="activity-table" id="screener-table">
-        <thead>
-          <tr>
-            <th>Symbol</th><th>Price</th><th>BB Lower</th>
-            <th>RSI</th><th>Vol Ratio</th><th>Score</th>
-          </tr>
-        </thead>
-        <tbody id="screener-body"></tbody>
-      </table>
-    </div>
-  </div>
-
   <!-- BACKTEST PAGE -->
   <div id="page-backtest" class="page">
     <div class="page-header">
@@ -273,113 +235,6 @@
 
     <div id="bt-loading" class="loading-state" style="display:none">
       <div class="spinner"></div> Fetching data and running backtest…
-    </div>
-  </div>
-
-  <!-- HYPEROPT PAGE -->
-  <div id="page-hyperopt" class="page">
-    <div class="page-header">
-      <h1>Optimize</h1>
-    </div>
-    <p class="page-sub">Bayesian hyperparameter search (TPE) — finds the parameter set that maximises your chosen objective on in-sample data, then validates on held-out bars.</p>
-
-    <div class="backtest-layout">
-      <!-- Controls -->
-      <div class="backtest-controls card glass">
-        <div class="form-group">
-          <label>Symbol</label>
-          <input type="text" id="ho-symbol" class="text-input" value="AMZN" placeholder="AMZN">
-        </div>
-        <div class="form-group">
-          <label>Strategy</label>
-          <select id="ho-strategy" class="select-input">
-            <optgroup label="Equity (15-min bars)">
-              <option value="mean_reversion">Mean Reversion</option>
-            </optgroup>
-            <optgroup label="Crypto (1-hour bars)">
-              <option value="crypto_mean_reversion">Crypto Mean Reversion</option>
-              <option value="crypto_trend_following">Crypto Trend Following</option>
-              <option value="crypto_breakout">Crypto Breakout</option>
-            </optgroup>
-          </select>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Bar size</label>
-            <select id="ho-resolution" class="select-input">
-              <option value="15">15-min</option>
-              <option value="D">Daily</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Trials</label>
-            <select id="ho-evals" class="select-input">
-              <option value="30">30</option>
-              <option value="50" selected>50</option>
-              <option value="100">100</option>
-              <option value="200">200</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Start</label>
-            <input type="date" id="ho-start" class="text-input" value="2022-01-03">
-          </div>
-          <div class="form-group">
-            <label>End</label>
-            <input type="date" id="ho-end" class="text-input">
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Objective</label>
-          <select id="ho-objective" class="select-input">
-            <option value="sharpe_ratio">Sharpe Ratio</option>
-            <option value="total_return">Total Return</option>
-            <option value="profit_factor">Profit Factor</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Train / Test split</label>
-          <select id="ho-trainpct" class="select-input">
-            <option value="0.60">60 / 40</option>
-            <option value="0.70" selected>70 / 30</option>
-            <option value="0.80">80 / 20</option>
-          </select>
-        </div>
-        <button class="btn-primary btn-full" onclick="runHyperopt()">Run Optimization</button>
-      </div>
-
-      <!-- Results -->
-      <div class="backtest-results" id="ho-results" style="display:none">
-        <!-- Convergence chart -->
-        <div class="card glass">
-          <div class="card-header">
-            <span class="card-title">Convergence — Best Score per Trial</span>
-            <span class="ho-objective-label" id="ho-obj-label"></span>
-          </div>
-          <div id="chart-hyperopt" class="chart-container"></div>
-        </div>
-
-        <!-- In vs out stats -->
-        <div class="stats-row" id="ho-stats-row"></div>
-
-        <!-- Best params -->
-        <div class="card glass">
-          <div class="card-header"><span class="card-title">Best Parameters Found</span></div>
-          <div id="ho-params-grid" class="ho-params-grid"></div>
-        </div>
-      </div>
-
-      <div class="backtest-placeholder card glass" id="ho-placeholder">
-        <div class="empty-icon">◈</div>
-        <div>Configure and run optimization</div>
-        <div class="empty-sub">TPE Bayesian search — smarter than grid search, faster than random</div>
-      </div>
-    </div>
-
-    <div id="ho-loading" class="loading-state" style="display:none">
-      <div class="spinner"></div> Running <span id="ho-loading-label">50</span> trials…
     </div>
   </div>
 

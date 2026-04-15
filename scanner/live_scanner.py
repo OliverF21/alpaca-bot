@@ -105,25 +105,31 @@ class LiveScanner:
         take_profit_pct: float    = 0.03,
         resolution: str           = "15",
         confirm_bars: int         = 2,
+        max_position_pct: float   = 0.25,
     ):
-        self.strategy        = strategy
-        self.watchlist       = watchlist
-        self.core_symbols    = core_symbols or []
-        self.poll_interval   = poll_interval
-        self.screen_interval = screen_interval
-        self.warmup_bars     = warmup_bars
-        self.max_positions   = max_positions
-        self.risk_pct        = risk_pct
-        self.stop_loss_pct   = stop_loss_pct
-        self.take_profit_pct = take_profit_pct
-        self.resolution      = resolution
-        self.confirm_bars    = confirm_bars
+        self.strategy         = strategy
+        self.watchlist        = watchlist
+        self.core_symbols     = core_symbols or []
+        self.poll_interval    = poll_interval
+        self.screen_interval  = screen_interval
+        self.warmup_bars      = warmup_bars
+        self.max_positions    = max_positions
+        self.risk_pct         = risk_pct
+        self.stop_loss_pct    = stop_loss_pct
+        self.take_profit_pct  = take_profit_pct
+        self.resolution       = resolution
+        self.confirm_bars     = confirm_bars
+        self.max_position_pct = max_position_pct
 
         self._cache: Dict[str, pd.DataFrame]   = {}
         self._active_symbols: List[str]        = []
         self._entry_confirmation: Dict[str, int] = {}   # symbol → consecutive entry bars
         self._position_entry_prices: Dict[str, float] = {}  # symbol → entry price
         self._daily_pnl: Dict[str, float] = {}          # date string → realized PnL
+        # Symbols whose trailing stop has already been moved to break-even.
+        # Prevents the cancel+resubmit churn described in issue #4 where
+        # each poll would re-move an already-moved stop.
+        self._trailing_moved: set = set()
 
         # Alpaca for orders + positions only
         self._trader = TradingClient(API_KEY, SECRET_KEY, paper=PAPER)
@@ -206,7 +212,15 @@ class LiveScanner:
 
         Implementation: cancel any open child orders (the bracket stop) and
         replace with a fresh stop order at the entry price.
+
+        Idempotent: once moved, we remember the symbol in
+        ``self._trailing_moved`` and skip re-issuing the cancel/submit on
+        subsequent polls. See issue #4 — without this guard AMZN on
+        2026-04-13 produced 8 stop-modification cycles in 14 minutes
+        because each poll re-ran the full dance on an already-moved stop.
         """
+        if symbol in self._trailing_moved:
+            return
         try:
             entry   = float(position.avg_entry_price)
             current = float(position.current_price)
@@ -215,23 +229,29 @@ class LiveScanner:
             if gain >= self.take_profit_pct / 2:
                 req         = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
                 open_orders = self._trader.get_orders(req)
+                old_stop    = None
                 for o in open_orders:
                     try:
+                        if o.stop_price is not None:
+                            old_stop = float(o.stop_price)
                         self._trader.cancel_order_by_id(o.id)
                     except Exception:
                         pass
 
+                new_stop = round(entry, 2)
                 from alpaca.trading.requests import StopOrderRequest
                 self._trader.submit_order(StopOrderRequest(
                     symbol        = symbol,
                     qty           = abs(int(float(position.qty))),
                     side          = OrderSide.SELL,
                     time_in_force = TimeInForce.DAY,
-                    stop_price    = round(entry, 2),
+                    stop_price    = new_stop,
                 ))
+                self._trailing_moved.add(symbol)
+                old_str = f"${old_stop:.2f}" if old_stop is not None else "n/a"
                 log.info(
-                    f"  Trailing stop: {symbol} gain={gain*100:.1f}% "
-                    f"→ stop moved to break-even {entry:.2f}"
+                    f"  STOP MOVED {symbol}: old={old_str} new=${new_stop:.2f} "
+                    f"gain={gain*100:.1f}% reason=trailing_break_even"
                 )
         except Exception as e:
             log.debug(f"  Trailing stop update failed for {symbol}: {e}")
@@ -267,16 +287,22 @@ class LiveScanner:
 
     # ── Signal evaluation ─────────────────────────────────────────────────────
 
-    def _refresh_and_evaluate(self, symbol: str) -> str:
-        """Fetch latest bars, update cache, run strategy, return signal."""
+    def _refresh_and_evaluate(self, symbol: str):
+        """Fetch latest bars, update cache, run strategy, return (signal, reason).
+
+        `reason` is the strategy-specific label describing why the bar
+        triggered (e.g. ``bb_lower+rsi_oversold`` for an entry,
+        ``bb_upper_touch`` for an exit). Empty string on hold or when the
+        strategy does not populate a ``reason`` column. See issue #3.
+        """
         try:
             df_new = fetch_bars(symbol, resolution=self.resolution, n_bars=self.warmup_bars)
         except Exception as e:
             log.warning(f"  {symbol}: data refresh failed — {e}")
-            return "hold"
+            return "hold", ""
 
         if df_new.empty or len(df_new) < 25:
-            return "hold"
+            return "hold", ""
 
         self._cache[symbol] = df_new
 
@@ -285,10 +311,12 @@ class LiveScanner:
             df = self.strategy.generate_signals(df)
         except Exception as e:
             log.debug(f"  {symbol}: strategy error — {e}")
-            return "hold"
+            return "hold", ""
 
-        sig = int(df["signal"].iloc[-1])
-        return "enter" if sig == 1 else "exit" if sig == -1 else "hold"
+        sig    = int(df["signal"].iloc[-1])
+        reason = str(df["reason"].iloc[-1]) if "reason" in df.columns else ""
+        signal = "enter" if sig == 1 else "exit" if sig == -1 else "hold"
+        return signal, reason
 
     # ── Portfolio helpers ─────────────────────────────────────────────────────
 
@@ -304,15 +332,14 @@ class LiveScanner:
 
     # ── Order execution ─────────────────────────────────────────────────────
 
-    def _qty(self, price: float) -> int:
+    def _qty(self, symbol: str, price: float) -> int:
         """
         Calculate share quantity for entry based on risk management.
-        
-        Risk sizing:
-          qty = risk_amount / (price_drop_per_share)
-          
-        But also respect buying power:
-          qty = min(risk_based_qty, buying_power / price)
+
+        Three independent caps applied (smallest wins):
+          1. Risk-based:     equity × risk_pct / (price × stop_loss_pct)
+          2. Buying power:   95% of buying_power / price
+          3. Position cap:   equity × max_position_pct / price   (issue #5)
         """
         try:
             account = self._trader.get_account()
@@ -321,31 +348,35 @@ class LiveScanner:
         except Exception as e:
             log.warning(f"Could not fetch account info: {e}")
             return 0
-        
-        # Risk-based sizing: how many shares can we afford to lose risk_pct of equity?
+
+        # 1. Risk-based sizing
         risk_amt = equity * self.risk_pct
-        stop_dist = price * self.stop_loss_pct  # $ per share at stop loss
+        stop_dist = price * self.stop_loss_pct
         qty_by_risk = max(int(risk_amt / stop_dist), 1) if stop_dist > 0 else 1
-        
-        # Buying power constraint: don't spend more than we have (with 5% buffer for safety)
-        buying_power_buffered = buying_power * 0.95  # Use only 95% of buying power
-        qty_by_bp = int(buying_power_buffered / price) if price > 0 else 1
-        
-        # Take the smaller of the two
-        qty = min(qty_by_risk, qty_by_bp)
-        
-        # Safety: never go negative or zero, and ensure minimum viable quantity
-        qty = max(qty, 1)  # At least 1 share
-        
-        # Additional safety: ensure order cost is reasonable (not too small)
-        min_order_value = 100  # Minimum $100 order
-        if qty * price < min_order_value:
-            qty = max(1, int(min_order_value / price))
-        
+
+        # 2. Buying power constraint (5% buffer)
+        qty_by_bp = int(buying_power * 0.95 / price) if price > 0 else 1
+
+        # 3. Position-size cap: no single position > max_position_pct of equity
+        max_notional = equity * self.max_position_pct
+        qty_by_cap = int(max_notional / price) if price > 0 else 0
+
+        qty = min(qty_by_risk, qty_by_bp, qty_by_cap)
+        qty = max(qty, 1)
+
+        # Floor at $100 minimum order
+        if qty * price < 100:
+            qty = max(1, int(100 / price))
+
+        log.info(
+            f"  SIZING {symbol}: equity=${equity:,.0f} risk={self.risk_pct*100:.2f}% "
+            f"cap={self.max_position_pct*100:.0f}% → qty={qty} "
+            f"(${qty*price:,.0f}, {qty*price/equity*100:.1f}% of equity)"
+        )
         return qty
 
-    def _enter(self, symbol: str, price: float):
-        qty = self._qty(price)
+    def _enter(self, symbol: str, price: float, reason: str = ""):
+        qty = self._qty(symbol, price)
         
         # Safety check: don't place order if qty is 0 or negative
         if qty <= 0:
@@ -367,7 +398,11 @@ class LiveScanner:
         sl  = round(price * (1 - self.stop_loss_pct), 2)
         tp  = round(price * (1 + self.take_profit_pct), 2)
         order_cost = qty * price
-        log.info(f"  ▶ ENTER {symbol:<6}  price={price:.2f}  qty={qty}  sl={sl}  tp={tp}  cost=${order_cost:,.0f}")
+        reason_tag = f"  reason={reason}" if reason else ""
+        log.info(
+            f"  ▶ ENTER {symbol:<6}  price={price:.2f}  qty={qty}  sl={sl}  tp={tp}  "
+            f"cost=${order_cost:,.0f}{reason_tag}"
+        )
         
         try:
             self._trader.submit_order(MarketOrderRequest(
@@ -383,18 +418,65 @@ class LiveScanner:
         except Exception as e:
             log.error(f"  ✗ Order failed for {symbol}: {e}")
 
-    def _exit(self, symbol: str, qty: str, current_price: float = float("nan")):
-        log.info(f"  ◀ EXIT  {symbol:<6}  qty={qty}")
-        self._trader.submit_order(MarketOrderRequest(
-            symbol        = symbol,
-            qty           = abs(int(float(qty))),
-            side          = OrderSide.SELL,
-            time_in_force = TimeInForce.DAY,
-        ))
+    def _exit(self, symbol: str, qty: str, current_price: float = float("nan"), reason: str = ""):
+        reason_tag = f"  reason={reason}" if reason else ""
+        log.info(f"  ◀ EXIT  {symbol:<6}  qty={qty}{reason_tag}")
+        sell_qty = abs(int(float(qty)))
+
+        # Cancel any open bracket children (STOP / LIMIT) holding the shares in
+        # `held_for_orders`. Without this, the market sell below fails with
+        # "insufficient qty available for order" and the strategy EXIT is
+        # silently broken for every bracketed position. See issue #2.
+        try:
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
+            open_orders = self._trader.get_orders(req)
+        except Exception as e:
+            log.warning(f"  {symbol}: could not list open orders before exit — {e}")
+            open_orders = []
+
+        canceled_any = False
+        for o in open_orders:
+            try:
+                self._trader.cancel_order_by_id(o.id)
+                canceled_any = True
+                log.info(f"  Canceled bracket child {o.side.value} {o.type.value} ({o.id})")
+            except Exception as e:
+                log.warning(f"  Cancel failed for {o.id}: {e}")
+
+        # Alpaca processes cancellations asynchronously. Poll `qty_available`
+        # for up to ~2s so the market sell doesn't race ahead of the release
+        # of `held_for_orders`. 10 x 200ms gives ample headroom in practice.
+        if canceled_any:
+            for _ in range(10):
+                time.sleep(0.2)
+                try:
+                    pos = self._trader.get_open_position(symbol)
+                    if int(float(pos.qty_available)) >= sell_qty:
+                        break
+                except Exception:
+                    # Position gone (already flat) — cancel alone closed us out
+                    break
+
+        try:
+            self._trader.submit_order(MarketOrderRequest(
+                symbol        = symbol,
+                qty           = sell_qty,
+                side          = OrderSide.SELL,
+                time_in_force = TimeInForce.DAY,
+            ))
+        except Exception as e:
+            log.error(f"  ✗ EXIT submit failed for {symbol}: {e}")
+            return
+
+        # Clear trailing-stop tracking — the bracket child that held the
+        # break-even stop is gone, and a re-entry on this symbol should
+        # start the half-TP check fresh. See issue #4.
+        self._trailing_moved.discard(symbol)
+
         # Track realized daily PnL
         entry = self._position_entry_prices.pop(symbol, None)
         if entry and not pd.isna(current_price):
-            realized = (current_price - entry) * abs(int(float(qty)))
+            realized = (current_price - entry) * sell_qty
             today    = datetime.date.today().isoformat()
             self._daily_pnl[today] = self._daily_pnl.get(today, 0.0) + realized
             log.info(
@@ -435,6 +517,14 @@ class LiveScanner:
             positions = self._safe_open_positions()
             n_open    = len(positions)
 
+            # Reconcile trailing-stop tracking against live positions. If a
+            # symbol was flattened externally (bracket TP fill, manual close,
+            # scanner restart) clear its entry so a future re-entry starts
+            # the half-TP check fresh. See issue #4.
+            stale = self._trailing_moved - set(positions)
+            if stale:
+                self._trailing_moved -= stale
+
             # Merge core symbols (always evaluated) with screener candidates
             poll_symbols = list(dict.fromkeys(
                 self.core_symbols + self._active_symbols
@@ -466,11 +556,15 @@ class LiveScanner:
                             f"(entry={entry_price:.2f}, now={current_price:.2f}, "
                             f"threshold={self.stop_loss_pct*100:.1f}%)"
                         )
-                        self._exit(symbol, pos.qty, current_price=current_price)
+                        self._exit(
+                            symbol, pos.qty,
+                            current_price=current_price,
+                            reason="hard_stop_loss",
+                        )
                         n_open -= 1
                         continue
 
-                raw_signal = self._refresh_and_evaluate(symbol)
+                raw_signal, reason = self._refresh_and_evaluate(symbol)
 
                 if symbol in self._cache and not self._cache[symbol].empty:
                     price = float(self._cache[symbol]["close"].iloc[-1])
@@ -478,25 +572,27 @@ class LiveScanner:
                 # Improvement 2: signal confirmation — require 2 consecutive bars
                 signal = self._confirm_signal(symbol, raw_signal)
 
+                reason_suffix = f"  reason={reason}" if reason else ""
                 log.info(
-                    f"  close={price:.2f}  raw={raw_signal.upper():<5}  "
-                    f"confirmed={signal.upper():<5}  positions={n_open}/{self.max_positions}"
+                    f"  {symbol}: close={price:.2f}  raw={raw_signal.upper():<5}  "
+                    f"confirmed={signal.upper():<5}  "
+                    f"positions={n_open}/{self.max_positions}{reason_suffix}"
                 )
 
                 if signal == "enter" and symbol not in positions:
                     if n_open >= self.max_positions:
-                        log.info(f"  Skipped — max positions reached")
+                        log.info(f"  {symbol}: skipped — max positions reached")
                     elif self._has_pending_order(symbol):
-                        log.info(f"  Skipped — pending order exists")
+                        log.info(f"  {symbol}: skipped — pending order exists")
                     else:
-                        self._enter(symbol, price)
+                        self._enter(symbol, price, reason=reason)
                         n_open += 1
 
                 elif signal == "exit" and symbol in positions:
-                    self._exit(symbol, positions[symbol].qty, current_price=price)
+                    self._exit(symbol, positions[symbol].qty, current_price=price, reason=reason)
 
                 else:
-                    log.info(f"  Hold")
+                    log.info(f"  {symbol}: hold")
 
             log.info(f"─── Sleeping {self.poll_interval}s ─────────────────────")
             time.sleep(self.poll_interval)

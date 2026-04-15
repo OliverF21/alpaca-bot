@@ -59,6 +59,85 @@ def health_check():
     return {"status": "ok"}
 
 
+# ── Version / build info ─────────────────────────────────────────────────────
+
+_STARTED_AT = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+def _git_info() -> dict:
+    """Return current git SHA + branch by reading .git directly (no subprocess).
+
+    We parse .git/HEAD + the referenced ref file rather than shelling out to
+    `git rev-parse` so this works in hardened environments where subprocess is
+    restricted. Falls back to 'unknown' on any parse failure.
+    """
+    out = {"git_sha": "unknown", "git_branch": "unknown"}
+    try:
+        head = (_REPO / ".git" / "HEAD").read_text().strip()
+        if head.startswith("ref: "):
+            ref = head[5:]
+            out["git_branch"] = ref.rsplit("/", 1)[-1]
+            ref_file = _REPO / ".git" / ref
+            if ref_file.exists():
+                out["git_sha"] = ref_file.read_text().strip()
+            else:
+                # Packed refs fallback
+                packed = _REPO / ".git" / "packed-refs"
+                if packed.exists():
+                    for line in packed.read_text().splitlines():
+                        if line.endswith(" " + ref):
+                            out["git_sha"] = line.split(" ", 1)[0]
+                            break
+        else:
+            # Detached HEAD — HEAD itself is the SHA
+            out["git_sha"] = head
+            out["git_branch"] = "(detached)"
+    except Exception:
+        pass
+    return out
+
+def _loaded_strategies() -> dict:
+    """Extract strategy class names by parsing the scanner entry-point files.
+
+    We can't introspect the running scanner subprocesses from the webapp
+    process, but the entry-point source files are the source of truth for
+    what each run_all.py child actually loads. Any change to which strategies
+    are live requires editing these files, so parsing them reflects reality.
+    """
+    import re
+    out = {"equity": [], "crypto": []}
+    for name, path in [
+        ("equity", _REPO / "scanner" / "run_scanner.py"),
+        ("crypto", _REPO / "scanner" / "run_crypto_scanner.py"),
+    ]:
+        try:
+            src = path.read_text()
+            # Match `from strategies.<x> import <ClassName>Strategy`
+            out[name] = re.findall(r"from strategies\.\w+ import (\w+Strategy)", src)
+        except Exception:
+            pass
+    return out
+
+@app.get("/api/version")
+def get_version():
+    """Report what code this dashboard process is running.
+
+    Used by the recap pipeline to verify remote hosts (e.g. the Pi) are on
+    the expected commit — `curl http://pi.local:8000/api/version` shows the
+    git SHA, branch, which strategy classes are loaded by each scanner, and
+    when this process started. See issue #11.
+    """
+    import socket
+    strategies = _loaded_strategies()
+    return {
+        **_git_info(),
+        "started_at":        _STARTED_AT,
+        "hostname":          socket.gethostname(),
+        "equity_strategies": strategies["equity"],
+        "crypto_strategies": strategies["crypto"],
+        "paper":             _PAPER,
+    }
+
+
 # ── Root ──────────────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -215,30 +294,6 @@ def get_equity_log(days: int = 30):
     }
 
 
-# ── Screener ──────────────────────────────────────────────────────────────────
-
-@app.get("/api/screener")
-def run_screener(universe: str = "sp100", max_candidates: int = 15):
-    try:
-        from scanner.screener import (
-            MeanReversionScreener,
-            WATCHLIST_SP100, WATCHLIST_SECTOR_ETFS, WATCHLIST_LARGE_CAP,
-        )
-        wl_map = {
-            "sp100":    WATCHLIST_SP100,
-            "etfs":     WATCHLIST_SECTOR_ETFS,
-            "largecap": WATCHLIST_LARGE_CAP,
-        }
-        wl = wl_map.get(universe, WATCHLIST_SP100)
-        screener = MeanReversionScreener(
-            watchlist=wl, bb_window=20, bb_std=2.0,
-            rsi_window=14, max_rsi=38, max_candidates=max_candidates,
-        )
-        return screener.scan()
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
 # ── Backtest ──────────────────────────────────────────────────────────────────
 
 class BacktestRequest(BaseModel):
@@ -309,122 +364,6 @@ def run_backtest_api(req: BacktestRequest):
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
-
-
-# ── Hyperopt ──────────────────────────────────────────────────────────────────
-
-class HyperoptRequest(BaseModel):
-    symbol:          str   = "AMZN"
-    start:           str   = "2022-01-03"
-    end:             str   = "2025-12-31"
-    resolution:      str   = "15"
-    strategy:        str   = "mean_reversion"
-    max_evals:       int   = 50
-    train_pct:       float = 0.70
-    objective:       str   = "sharpe_ratio"
-
-@app.post("/api/hyperopt")
-def run_hyperopt_api(req: HyperoptRequest):
-    try:
-        from optimization.hyperopt_runner import (
-            HyperoptRunner,
-            MEAN_REVERSION_SPACE,
-            CRYPTO_MR_SPACE,
-            CRYPTO_TREND_SPACE,
-            CRYPTO_BREAKOUT_SPACE,
-            CRYPTO_SUPERTREND_SPACE,
-        )
-
-        # Route to correct strategy class + search space + data fetcher
-        _CRYPTO_STRATEGIES = {
-            "crypto_mean_reversion",
-            "crypto_trend_following",
-            "crypto_breakout",
-            "crypto_supertrend",
-        }
-
-        is_crypto = req.strategy in _CRYPTO_STRATEGIES
-
-        if is_crypto:
-            from data.crypto_fetcher import fetch_crypto_bars_range
-            from strategies.crypto_mean_reversion import CryptoMeanReversionStrategy
-            from strategies.crypto_trend_following import CryptoTrendFollowingStrategy
-            from strategies.crypto_breakout import CryptoBreakoutStrategy
-            from strategies.crypto_supertrend import CryptoSupertrendStrategy
-            _strat_map = {
-                "crypto_mean_reversion":  (CryptoMeanReversionStrategy, CRYPTO_MR_SPACE),
-                "crypto_trend_following": (CryptoTrendFollowingStrategy, CRYPTO_TREND_SPACE),
-                "crypto_breakout":        (CryptoBreakoutStrategy,       CRYPTO_BREAKOUT_SPACE),
-                "crypto_supertrend":      (CryptoSupertrendStrategy,     CRYPTO_SUPERTREND_SPACE),
-            }
-            strat_cls, search_space = _strat_map[req.strategy]
-            df = fetch_crypto_bars_range(req.symbol, req.start, req.end, resolution=req.resolution)
-            df.index = pd.to_datetime(df.index)
-        else:
-            from data.fetcher import fetch_bars_range
-            from strategies.mean_reversion import MeanReversionStrategy
-            strat_cls    = MeanReversionStrategy
-            search_space = MEAN_REVERSION_SPACE
-            df = fetch_bars_range(req.symbol, req.start, req.end, resolution=req.resolution)
-            df.index = pd.to_datetime(df.index)
-            if req.resolution == "15":
-                df = df.between_time("14:30", "21:00")
-
-        if df.empty:
-            raise HTTPException(400, "No data returned for that symbol/range.")
-
-        runner = HyperoptRunner(
-            strategy_class=strat_cls,
-            df=df,
-            search_space=search_space,
-            max_evals=req.max_evals,
-            objective=req.objective,
-            train_pct=req.train_pct,
-            min_trades=2,
-        )
-        best_params, result = runner.optimize()
-
-        # Build convergence curve: best loss so far at each trial
-        import numpy as np
-        losses = []
-        for t in result.all_trials.trials:
-            l = t["result"].get("loss", 999.0)
-            losses.append(float(l) if l != 999.0 else None)
-
-        best_so_far = []
-        running_best = None
-        for l in losses:
-            if l is not None and (running_best is None or l < running_best):
-                running_best = l
-            best_so_far.append(float(running_best) if running_best is not None else None)
-
-        def _stats(s):
-            return {
-                "total_return":  round(s.total_return * 100, 2),
-                "sharpe_ratio":  round(s.sharpe_ratio, 3),
-                "max_drawdown":  round(s.max_drawdown * 100, 2),
-                "win_rate":      round(s.win_rate * 100, 1),
-                "n_trades":      s.n_trades,
-            }
-
-        return {
-            "best_params":    best_params,
-            "in_sample":      _stats(result.in_sample),
-            "out_of_sample":  _stats(result.out_of_sample),
-            "convergence":    [
-                {"trial": i + 1, "loss": l, "best": b}
-                for i, (l, b) in enumerate(zip(losses, best_so_far))
-            ],
-            "n_trials": len(losses),
-            "objective": req.objective,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        msg = str(e) or type(e).__name__
-        if "AllTrialsFailed" in type(e).__name__ or not msg:
-            raise HTTPException(500, "All optimization trials failed — try more evals, a wider date range, or a different symbol.")
-        raise HTTPException(500, msg)
 
 
 # ── Crypto: positions ─────────────────────────────────────────────────────────

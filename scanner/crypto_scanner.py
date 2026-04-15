@@ -296,12 +296,50 @@ class CryptoScanner:
     def _exit(self, symbol: str, qty: str, current_price: float = float("nan")):
         qty_float = abs(float(qty))
         log.info(f"  ◀ EXIT  {symbol:<10}  qty={qty_float}")
-        self._trader.submit_order(MarketOrderRequest(
-            symbol        = symbol,
-            qty           = qty_float,
-            side          = OrderSide.SELL,
-            time_in_force = TimeInForce.GTC,
-        ))
+
+        # Cancel any open bracket children (STOP / LIMIT) holding the qty in
+        # `held_for_orders`. Without this, the market sell below fails with
+        # "insufficient qty available for order" and the strategy EXIT is
+        # silently broken for every bracketed crypto position. See issue #2.
+        try:
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
+            open_orders = self._trader.get_orders(req)
+        except Exception as e:
+            log.warning(f"  {symbol}: could not list open orders before exit — {e}")
+            open_orders = []
+
+        canceled_any = False
+        for o in open_orders:
+            try:
+                self._trader.cancel_order_by_id(o.id)
+                canceled_any = True
+                log.info(f"  Canceled bracket child {o.side.value} {o.type.value} ({o.id})")
+            except Exception as e:
+                log.warning(f"  Cancel failed for {o.id}: {e}")
+
+        # Poll qty_available up to ~2s so the market sell doesn't race the
+        # release of `held_for_orders` (Alpaca cancel is async).
+        if canceled_any:
+            for _ in range(10):
+                time.sleep(0.2)
+                try:
+                    pos = self._trader.get_open_position(symbol)
+                    if float(pos.qty_available) >= qty_float:
+                        break
+                except Exception:
+                    break
+
+        try:
+            self._trader.submit_order(MarketOrderRequest(
+                symbol        = symbol,
+                qty           = qty_float,
+                side          = OrderSide.SELL,
+                time_in_force = TimeInForce.GTC,
+            ))
+        except Exception as e:
+            log.error(f"  ✗ EXIT submit failed for {symbol}: {e}")
+            return
+
         entry = self._position_meta.pop(symbol, {}).get("entry_price")
         if entry and not pd.isna(current_price):
             realized = (current_price - entry) * qty_float

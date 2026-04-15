@@ -36,8 +36,6 @@ except ImportError:
 
 from scanner.screener import WATCHLIST_SP100, WATCHLIST_LARGE_CAP
 from scanner.live_scanner import LiveScanner
-from strategy_ide.monitor.equity_monitor import EquityMonitor
-from pathlib import Path
 
 # ── VWAP Reversion (primary — high frequency) ────────────────────────────────
 # 5-min bars, relaxed thresholds, no confirmation delay.
@@ -118,26 +116,8 @@ if __name__ == "__main__":
         print("  LIVE TRADING — real money, real orders")
     print()
 
-    # ── Equity monitor ────────────────────────────────────────────────────────
-    def on_daily_loss(equity: float, loss_pct: float) -> None:
-        print(f"\n  DAILY LOSS LIMIT HIT — equity=${equity:,.2f}  loss={loss_pct*100:.1f}%")
-        print("  Consider stopping the scanner manually.\n")
-
-    def on_drawdown(equity: float, dd_pct: float) -> None:
-        print(f"\n  MAX DRAWDOWN HIT — equity=${equity:,.2f}  drawdown={dd_pct*100:.1f}%\n")
-
-    monitor = EquityMonitor(
-        alpaca_client        = vwap_scanner._trader,
-        poll_interval        = 60,
-        daily_loss_limit_pct = 0.03,
-        max_drawdown_pct     = 0.06,
-        on_daily_loss_breach = on_daily_loss,
-        on_drawdown_breach   = on_drawdown,
-        log_dir              = Path("equity_logs"),
-    )
-    monitor.start()
-
     # ── Launch both scanners ──────────────────────────────────────────────────
+    # Equity monitor now runs as its own service (run_equity_monitor.py / issue #10)
     # VWAP runs in the main thread, Hybrid runs in a daemon thread.
     hybrid_thread = threading.Thread(
         target=hybrid_scanner.run,
@@ -152,5 +132,3 @@ if __name__ == "__main__":
         vwap_scanner.run()   # blocks here until Ctrl-C
     except KeyboardInterrupt:
         print("\nInterrupted — shutting down")
-    finally:
-        monitor.stop()

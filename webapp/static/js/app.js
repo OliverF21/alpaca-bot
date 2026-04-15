@@ -15,6 +15,14 @@ async function api(path, opts={}) {
 }
 
 /* ── Navigation ───────────────────────────────────────────────────────── */
+// Per-page auto-refresh. On every navigate() we clear the prior timer and,
+// if the destination page has a loader, start a fresh 30s poll so the page
+// stays in sync with backend state without a manual click. Backtest is
+// deliberately not polled — it's user-triggered and re-running it on a timer
+// would re-hit the data API every 30s. See issue #7.
+let _pollTimer = null;
+const POLL_INTERVAL_MS = 30_000;
+
 function navigate(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -22,16 +30,23 @@ function navigate(page) {
   document.querySelector(`[data-page="${page}"]`).classList.add('active');
 
   const loaders = { portfolio: loadPortfolio, positions: loadPositions, activity: loadActivity, crypto: loadCryptoPositions };
-  if (loaders[page]) loaders[page]();
+
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+
+  const loader = loaders[page];
+  if (loader) {
+    loader();
+    _pollTimer = setInterval(loader, POLL_INTERVAL_MS);
+  }
 }
 
 /* ── Bootstrap ────────────────────────────────────────────────────────── */
-// Set today as default end date for backtest and hyperopt
+// Set today as default end date for backtest, then enter the default page
+// via navigate() so the auto-refresh timer gets started for the initial view.
 document.addEventListener('DOMContentLoaded', () => {
   const today = new Date().toISOString().slice(0,10);
   if ($('bt-end'))  $('bt-end').value  = today;
-  if ($('ho-end'))  $('ho-end').value  = today;
-  loadPortfolio();
+  navigate('portfolio');
 });
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -209,50 +224,6 @@ async function loadActivity() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   SCREENER PAGE
-══════════════════════════════════════════════════════════════════════ */
-async function runScreener() {
-  const universe = $('screener-universe').value;
-  $('screener-loading').style.display = 'flex';
-  $('screener-card').style.display    = 'none';
-  try {
-    const results = await api(`/api/screener?universe=${universe}&max_candidates=20`);
-    $('screener-loading').style.display = 'none';
-    if (!results.length) {
-      $('screener-body').innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:40px">No setups found right now</td></tr>`;
-    } else {
-      $('screener-body').innerHTML = results.map(r => {
-        const score    = r.score || r.Score || 0;
-        const pct      = Math.min(score * 200, 100);
-        const strength = score < 0.25 ? 'strong' : score < 0.45 ? 'medium' : 'weak';
-        const scoreColor = score < 0.25 ? 'var(--green)' : score < 0.45 ? '#f0a500' : 'var(--text-3)';
-        return `
-          <tr>
-            <td><strong>${r.symbol}</strong></td>
-            <td>${fmt(r.close)}</td>
-            <td>${fmt(r.bb_lower)}</td>
-            <td style="color:var(--green)">${Number(r.rsi || r.RSI).toFixed(1)}</td>
-            <td>${Number(r.vol_ratio || r['Vol Ratio'] || 0).toFixed(2)}x</td>
-            <td>
-              <div class="score-bar">
-                <div class="score-track">
-                  <div class="score-fill ${strength}" style="width:${pct}%"></div>
-                </div>
-                <span class="score-num" style="color:${scoreColor}">${score.toFixed(3)}</span>
-              </div>
-            </td>
-          </tr>`;
-      }).join('');
-    }
-    $('screener-card').style.display = 'block';
-  } catch(e) {
-    $('screener-loading').style.display = 'none';
-    $('screener-body').innerHTML = `<tr><td colspan="6" style="color:var(--red);padding:20px">${e.message}</td></tr>`;
-    $('screener-card').style.display = 'block';
-  }
-}
-
-/* ══════════════════════════════════════════════════════════════════════
    BACKTEST PAGE
 ══════════════════════════════════════════════════════════════════════ */
 async function runBacktest() {
@@ -397,130 +368,6 @@ function plotLayout(height=220) {
       font:        { family: 'Inter, sans-serif', size: 12, color: '#f0f2f5' },
     },
   };
-}
-
-/* ══════════════════════════════════════════════════════════════════════
-   HYPEROPT PAGE
-══════════════════════════════════════════════════════════════════════ */
-async function runHyperopt() {
-  const nEvals = parseInt($('ho-evals').value);
-  $('ho-loading-label').textContent = nEvals;
-  $('ho-results').style.display     = 'none';
-  $('ho-placeholder').style.display = 'none';
-  $('ho-loading').style.display     = 'flex';
-
-  const payload = {
-    symbol:     $('ho-symbol').value.trim().toUpperCase() || 'AMZN',
-    strategy:   $('ho-strategy').value,
-    resolution: $('ho-resolution').value,
-    start:      $('ho-start').value,
-    end:        $('ho-end').value,
-    max_evals:  nEvals,
-    train_pct:  parseFloat($('ho-trainpct').value),
-    objective:  $('ho-objective').value,
-  };
-
-  try {
-    const data = await api('/api/hyperopt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    $('ho-loading').style.display = 'none';
-    renderHyperoptResults(data);
-  } catch(e) {
-    $('ho-loading').style.display     = 'none';
-    $('ho-placeholder').style.display = 'flex';
-    $('ho-placeholder').innerHTML = `<div class="empty-icon">⚠</div><div style="color:var(--red)">${e.message}</div>`;
-  }
-}
-
-function renderHyperoptResults(data) {
-  // Objective label
-  const objLabels = { sharpe_ratio: 'Sharpe Ratio', total_return: 'Total Return (%)', profit_factor: 'Profit Factor' };
-  $('ho-obj-label').textContent = objLabels[data.objective] || data.objective;
-
-  // Convergence chart — best loss so far converted to score (negate loss back to metric)
-  const conv = data.convergence.filter(p => p.best !== null);
-  const trials = conv.map(p => p.trial);
-  const scores = conv.map(p => -p.best);  // loss = -metric, so negate back
-
-  const trialLosses = data.convergence.map(p => p.loss !== null ? -p.loss : null);
-
-  const layout = plotLayout(260);
-  layout.yaxis.tickprefix = '';
-  layout.yaxis.title = { text: objLabels[data.objective] || data.objective, font: { size: 10 } };
-  layout.xaxis.title = { text: 'Trial', font: { size: 10 } };
-  layout.showlegend = true;
-
-  Plotly.react('chart-hyperopt', [
-    {
-      x: data.convergence.map((_,i) => i+1),
-      y: trialLosses,
-      type: 'scatter', mode: 'markers', name: 'Trial score',
-      marker: { color: 'rgba(139,148,158,0.4)', size: 5 },
-      hovertemplate: 'Trial %{x}<br>Score: <b>%{y:.4f}</b><extra></extra>',
-    },
-    {
-      x: trials,
-      y: scores,
-      type: 'scatter', mode: 'lines', name: 'Best so far',
-      line: { color: '#00d4aa', width: 2.5 },
-      fill: 'tozeroy', fillcolor: 'rgba(0,212,170,0.06)',
-      hovertemplate: 'Trial %{x}<br>Best: <b>%{y:.4f}</b><extra></extra>',
-    },
-  ], layout, { displayModeBar: false, responsive: true });
-
-  // In-sample vs out-of-sample stats
-  const ins = data.in_sample;
-  const oos = data.out_of_sample;
-  const statDef = [
-    { key: 'total_return', label: 'Total Return', fmt: v => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, color: v => v >= 0 ? 'var(--green)' : 'var(--red)' },
-    { key: 'sharpe_ratio', label: 'Sharpe',       fmt: v => v.toFixed(3) },
-    { key: 'max_drawdown', label: 'Max Drawdown', fmt: v => `${v.toFixed(1)}%`, color: () => 'var(--red)' },
-    { key: 'win_rate',     label: 'Win Rate',     fmt: v => `${v.toFixed(1)}%` },
-    { key: 'n_trades',     label: 'Trades',       fmt: v => v },
-  ];
-
-  $('ho-stats-row').innerHTML = statDef.map(s => {
-    const inV  = ins[s.key];
-    const ooV  = oos[s.key];
-    const inCol  = s.color ? s.color(inV)  : 'var(--text)';
-    const ooCol  = s.color ? s.color(ooV)  : 'var(--text)';
-    return `
-      <div class="bt-stat glass">
-        <div class="bt-stat-label">${s.label}</div>
-        <div class="ho-split-vals">
-          <div>
-            <div class="ho-split-tag">In-sample</div>
-            <div class="bt-stat-value" style="color:${inCol};font-size:15px">${s.fmt(inV)}</div>
-          </div>
-          <div class="ho-split-div"></div>
-          <div>
-            <div class="ho-split-tag">Out-of-sample</div>
-            <div class="bt-stat-value" style="color:${ooCol};font-size:15px">${s.fmt(ooV)}</div>
-          </div>
-        </div>
-      </div>`;
-  }).join('');
-
-  // Best params grid
-  const paramNames = {
-    bb_window: 'BB Window', bb_std: 'BB Std Dev', rsi_window: 'RSI Window',
-    buy_rsi: 'Buy RSI', sell_rsi: 'Sell RSI', entry_pct_b_max: 'Entry %B Max',
-    stop_loss_pct: 'Stop Loss %', take_profit_pct: 'Take Profit %',
-  };
-  $('ho-params-grid').innerHTML = Object.entries(data.best_params).map(([k, v]) => {
-    const label = paramNames[k] || k;
-    const display = typeof v === 'number' && !Number.isInteger(v) ? v.toFixed(4) : v;
-    return `
-      <div class="ho-param-item">
-        <div class="ho-param-label">${label}</div>
-        <div class="ho-param-value">${display}</div>
-      </div>`;
-  }).join('');
-
-  $('ho-results').style.display = 'block';
 }
 
 /* ══════════════════════════════════════════════════════════════════════
