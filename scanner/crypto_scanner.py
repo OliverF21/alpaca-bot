@@ -26,7 +26,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus, OrderClass
+from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
 
 _REPO         = os.path.join(os.path.dirname(__file__), "..")
@@ -269,15 +269,14 @@ class CryptoScanner:
             f"conviction={action['conviction']:.2f}  price={price}  limit={limit_price}  "
             f"qty={qty}  sl={sl}  tp={tp}  risk={risk_pct*100:.0f}%"
         )
+        # Alpaca does not support bracket/OTOCO orders for crypto.
+        # Submit a simple limit buy; stop/TP are enforced by _position_monitor_loop.
         self._trader.submit_order(LimitOrderRequest(
             symbol        = symbol,
             qty           = qty,
             limit_price   = limit_price,
             side          = OrderSide.BUY,
             time_in_force = TimeInForce.GTC,
-            order_class   = OrderClass.BRACKET,
-            stop_loss     = {"stop_price": sl},
-            take_profit   = {"limit_price": tp},
         ))
 
         # Track position metadata for monitoring
@@ -353,7 +352,11 @@ class CryptoScanner:
     # ── Position monitor (background thread) ─────────────────────────────────
 
     def _position_monitor_loop(self):
-        """Check stops/TPs every 5 minutes between polls."""
+        """Enforce stop-loss, take-profit, and trailing stops every 5 minutes.
+
+        Alpaca does not support bracket orders for crypto, so stop/TP
+        enforcement happens here instead of on the exchange side.
+        """
         while True:
             time.sleep(300)
             try:
@@ -367,8 +370,28 @@ class CryptoScanner:
 
                     current = float(pos.current_price)
                     entry = meta["entry_price"]
+                    sl = meta["stop_price"]
+                    tp = meta["take_profit_price"]
 
-                    # Trailing stop for high-conviction trend/breakout entries
+                    # ── Stop-loss hit ─────────────────────────────────
+                    if sl > 0 and current <= sl:
+                        log.info(
+                            f"  STOP HIT {symbol}  current={current:.4f}  "
+                            f"stop={sl:.4f}  entry={entry:.4f}"
+                        )
+                        self._exit(symbol, pos.qty, current_price=current)
+                        continue
+
+                    # ── Take-profit hit ───────────────────────────────
+                    if tp > 0 and current >= tp:
+                        log.info(
+                            f"  TP HIT {symbol}  current={current:.4f}  "
+                            f"tp={tp:.4f}  entry={entry:.4f}"
+                        )
+                        self._exit(symbol, pos.qty, current_price=current)
+                        continue
+
+                    # ── Trailing stop for high-conviction trend/breakout ──
                     if meta["trailing"]:
                         gain = (current - entry) / entry
                         if gain >= 0.05:  # 5% gain → start trailing
