@@ -46,12 +46,19 @@ class SignalArbitrator:
 
         actions = []
         enter_candidates = []
+        exited_symbols: Set[str] = set()  # track symbols exited this poll
 
         for symbol, sym_signals in by_symbol.items():
             enters = [s for s in sym_signals if s["signal"] == "enter"]
             exits = [s for s in sym_signals if s["signal"] == "exit"]
 
+            # If strategies disagree (some say enter, some say exit) on a held
+            # position, only exit if exit signals outnumber or match enters.
+            # This prevents sell→immediate rebuy churn from strategy conflict.
             if exits and symbol in held_positions:
+                if enters and len(enters) >= len(exits):
+                    log.info(f"  {symbol}: conflicting signals ({len(enters)} enter vs {len(exits)} exit) — holding")
+                    continue
                 best_exit = max(exits, key=lambda s: s["conviction"])
                 actions.append({
                     "symbol": symbol,
@@ -63,6 +70,7 @@ class SignalArbitrator:
                     "take_profit_price": 0,
                     "entry_price": 0,
                 })
+                exited_symbols.add(symbol)
                 continue
 
             if enters and symbol not in held_positions:
@@ -78,6 +86,10 @@ class SignalArbitrator:
         filtered = []
         for sig in enter_candidates:
             symbol = sig["symbol"]
+            # Never enter a symbol we just exited this poll (prevents sell→rebuy churn)
+            if symbol in exited_symbols:
+                log.info(f"  {symbol}: skipped — just exited this poll")
+                continue
             bars_since = cooldowns.get(symbol, COOLDOWN_BARS + 1)
             if bars_since <= COOLDOWN_BARS:
                 log.info(f"  {symbol}: skipped — cooldown ({bars_since}/{COOLDOWN_BARS} bars)")

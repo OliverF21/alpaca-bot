@@ -144,17 +144,16 @@ class CryptoBreakoutStrategy(BaseStrategy):
 
         # ── Stop price: ATR-based or percentage fallback ─────────────────────
         close_at_entry = df.loc[entry, "close"].astype(float)
+        pct_stop = (close_at_entry * (1 - self.stop_loss_pct)).round(4)
         if "atr" in df.columns and df.loc[entry, "atr"].notna().any():
             atr_at_entry = df.loc[entry, "atr"].astype(float)
             atr_stop     = (close_at_entry - self.atr_stop_mult * atr_at_entry).round(4)
-            pct_stop     = (close_at_entry * (1 - self.stop_loss_pct)).round(4)
-            df.loc[entry, "stop_price"] = atr_stop.where(
-                atr_at_entry.notna(), pct_stop
-            )
+            # Use the LOWER (wider) stop to avoid premature stop-outs on breakout retests
+            df.loc[entry, "stop_price"] = pd.DataFrame(
+                {"atr": atr_stop.where(atr_at_entry.notna(), pct_stop), "pct": pct_stop}
+            ).min(axis=1).round(4)
         else:
-            df.loc[entry, "stop_price"] = (
-                close_at_entry * (1 - self.stop_loss_pct)
-            ).round(4)
+            df.loc[entry, "stop_price"] = pct_stop
 
         df.loc[entry, "take_profit_price"] = (
             close_at_entry * (1 + self.take_profit_pct)

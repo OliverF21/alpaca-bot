@@ -125,6 +125,8 @@ class CryptoScanner:
         self._cooldowns: Dict[str, int]       = {}  # symbol → bars since exit
         self._position_meta: Dict[str, Dict]  = {}  # symbol → {strategy, stop, tp, trailing}
         self._daily_pnl: Dict[str, float]     = {}
+        self._last_poll_time: float           = 0.0  # monotonic time of last poll
+        self._recent_entries: Dict[str, float] = {}  # symbol → epoch of last entry
 
         self._trader = TradingClient(API_KEY, SECRET_KEY, paper=PAPER)
         self._ranker = UniverseRanker(
@@ -446,10 +448,22 @@ class CryptoScanner:
 
     # ── Main poll loop ───────────────────────────────────────────────────────
 
+    # Minimum seconds between polls — prevents rapid-fire trading on restarts
+    _MIN_POLL_GAP = 1800  # 30 minutes
+
     def _poll(self):
         while True:
             if self._maybe_sleep_quiet_window():
                 continue
+
+            # ── Guard: enforce minimum gap between polls ─────────────────────
+            now = time.monotonic()
+            elapsed = now - self._last_poll_time if self._last_poll_time else float("inf")
+            if elapsed < self._MIN_POLL_GAP:
+                wait = self._MIN_POLL_GAP - elapsed
+                log.info(f"─── Poll too soon ({elapsed:.0f}s since last) — waiting {wait:.0f}s")
+                time.sleep(wait)
+            self._last_poll_time = time.monotonic()
 
             log.info("─── Polling crypto signals ─────────────────────────")
 
@@ -494,8 +508,14 @@ class CryptoScanner:
                     if self._has_pending_order(symbol):
                         log.info(f"  {symbol}: skipped — pending order exists")
                         continue
+                    # Dedup: don't re-enter a symbol we entered less than 1 hour ago
+                    last_entry = self._recent_entries.get(symbol, 0)
+                    if time.time() - last_entry < 3600:
+                        log.info(f"  {symbol}: skipped — entered {time.time() - last_entry:.0f}s ago (< 1h)")
+                        continue
                     price = self._last_close(self._cache, symbol, fallback=action["entry_price"])
                     self._enter(symbol, price, action)
+                    self._recent_entries[symbol] = time.time()
 
             log.info(f"─── Sleeping {self.poll_interval}s ─────────────────────")
             time.sleep(self.poll_interval)

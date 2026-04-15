@@ -182,19 +182,22 @@ class CryptoSupertrendStrategy(BaseStrategy):
                 0.4 * st_score + 0.35 * rsi_score + 0.25 * duration_score
             ).round(4)
 
-        # ── Stop: Supertrend line at entry (adaptive ATR stop) ────────────────
+        # ── Stop: max(supertrend line, pct-based floor) at entry ────────────
+        # The Supertrend line at the moment of a bullish flip is very close to
+        # price — often < 1%.  Using it raw causes immediate stop-outs on
+        # normal noise.  Enforce a minimum stop distance of stop_loss_pct.
         close_at_entry = df.loc[entry, "close"].astype(float)
         st_at_entry    = df.loc[entry, "supertrend"].astype(float)
+        pct_stop = (close_at_entry * (1 - self.stop_loss_pct)).round(4)
 
         if st_at_entry.notna().any():
-            pct_stop = (close_at_entry * (1 - self.stop_loss_pct)).round(4)
-            df.loc[entry, "stop_price"] = st_at_entry.where(
-                st_at_entry.notna(), pct_stop
-            ).round(4)
+            # Take the LOWER (wider) of supertrend stop and pct stop
+            st_stop = st_at_entry.where(st_at_entry.notna(), pct_stop)
+            df.loc[entry, "stop_price"] = pd.DataFrame(
+                {"st": st_stop, "pct": pct_stop}
+            ).min(axis=1).round(4)
         else:
-            df.loc[entry, "stop_price"] = (
-                close_at_entry * (1 - self.stop_loss_pct)
-            ).round(4)
+            df.loc[entry, "stop_price"] = pct_stop
 
         df.loc[entry, "take_profit_price"] = (
             close_at_entry * (1 + self.take_profit_pct)
