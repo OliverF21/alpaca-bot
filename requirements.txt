@@ -27,6 +27,10 @@ pytz>=2023.3
 # Optimization
 hyperopt>=0.2.7
 
+# ML regime detection & volatility forecasting
+scikit-learn>=1.3.0
+arch>=6.0.0
+
 # Charting (optional — used by Streamlit dashboard and research)
 plotly>=5.18.0
 mplfinance>=0.12.10b0

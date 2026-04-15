@@ -26,5 +26,8 @@ logs/
 strategy_ide/research/crypto_results.json
 strategy_ide/research/results.json
 
+# Reference repos (cloned for study, not part of this project)
+references/
+
 # macOS
 .DS_Store

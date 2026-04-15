@@ -47,6 +47,8 @@ except ImportError:
 
 from scanner.crypto_universe import UniverseRanker
 from scanner.signal_arbitrator import SignalArbitrator, COOLDOWN_BARS
+from scanner.regime_detector import RegimeDetector, Regime, REGIME_STRATEGIES
+from scanner.vol_filter import VolatilityFilter
 
 log = logging.getLogger(__name__)
 
@@ -133,6 +135,13 @@ class CryptoScanner:
             refresh_interval=universe_refresh,
             top_k=universe_top_k,
         )
+        self._regime_detector = RegimeDetector(
+            lookback=20, fit_window=200, refit_every=24,
+        )
+        self._vol_filter = VolatilityFilter(
+            lookback=24, long_lookback=168,
+            extreme_threshold=2.5, high_threshold=1.5, low_threshold=0.6,
+        )
 
         mode = "PAPER" if PAPER else "LIVE"
         log.info(f"CryptoScanner ready [{mode}]  {len(strategies)} strategies")
@@ -200,13 +209,20 @@ class CryptoScanner:
                 parts.append(f"{c}={v:.4f}" if isinstance(v, float) else f"{c}={v}")
         log.info(f"  [{symbol}] {strat_name}: {signal.upper()}  {' | '.join(parts)}")
 
-    def _evaluate_all_strategies(self, symbol: str, df: pd.DataFrame) -> List[Dict]:
-        """Run all strategies on a pair's data, return list of signal dicts.
+    def _evaluate_all_strategies(
+        self, symbol: str, df: pd.DataFrame,
+        allowed_strategies: set = None,
+        stop_mult: float = 1.0,
+    ) -> List[Dict]:
+        """Run strategies on a pair's data, return list of signal dicts.
 
-        Fix 3: drop the still-forming bar so indicators use closed data only.
-        Fix 1: scan last SIGNAL_LOOKBACK closed bars for a non-hold signal
-               (edge-triggered strategies fire on exactly one bar).
-        Fix 2: log indicator snapshot per strategy even on HOLD.
+        Parameters
+        ----------
+        allowed_strategies : set or None
+            If provided, only run strategies whose .name is in this set.
+            Strategies not in the set are skipped entirely (regime gating).
+        stop_mult : float
+            GARCH-based multiplier applied to stop prices (>1 = wider stops).
         """
         results = []
         if len(df) < 2:
@@ -216,6 +232,10 @@ class CryptoScanner:
         df_closed = df.iloc[:-1]
 
         for strat in self.strategies:
+            # Regime gating: skip strategies not allowed in current regime
+            if allowed_strategies is not None and strat.name not in allowed_strategies:
+                log.info(f"  [{symbol}] {strat.name}: SKIPPED (regime gate)")
+                continue
             try:
                 df_copy = df_closed.copy()
                 df_copy = strat.populate_indicators(df_copy)
@@ -242,13 +262,21 @@ class CryptoScanner:
                 # entry_price uses latest closed bar (what we'd actually buy at)
                 entry_price = float(diag["close"])
 
+                raw_stop = float(sig_row.get("stop_price", 0)) if not pd.isna(sig_row.get("stop_price", float("nan"))) else 0
+                raw_tp = float(sig_row.get("take_profit_price", 0)) if not pd.isna(sig_row.get("take_profit_price", float("nan"))) else 0
+
+                # Apply GARCH vol multiplier: widen stop distance from entry
+                if stop_mult != 1.0 and raw_stop > 0:
+                    stop_dist = entry_price - raw_stop
+                    raw_stop = entry_price - stop_dist * stop_mult
+
                 results.append({
                     "symbol": symbol,
                     "signal": signal_str,
                     "conviction": conviction,
                     "strategy": strat.name,
-                    "stop_price": float(sig_row.get("stop_price", 0)) if not pd.isna(sig_row.get("stop_price", float("nan"))) else 0,
-                    "take_profit_price": float(sig_row.get("take_profit_price", 0)) if not pd.isna(sig_row.get("take_profit_price", float("nan"))) else 0,
+                    "stop_price": raw_stop,
+                    "take_profit_price": raw_tp,
                     "entry_price": entry_price,
                 })
             except Exception as e:
@@ -482,15 +510,43 @@ class CryptoScanner:
             log.info(f"Universe: {universe}")
             log.info(f"Held: {list(held)}")
 
+            # ── Regime detection + volatility analysis ────────────────────────
+            # Run on all symbols we have cached data for
+            for symbol in all_symbols:
+                df = self._refresh_bars(symbol)
+
+            regimes = self._regime_detector.detect_per_symbol(self._cache)
+            vol_results = self._vol_filter.analyze_universe(self._cache)
+
+            for sym, regime in regimes.items():
+                vr = vol_results.get(sym)
+                vol_info = f"vol={vr.vol_regime} stop_mult={vr.stop_mult}" if vr else ""
+                log.info(f"  {sym}: regime={regime.value}  {vol_info}")
+
             # Collect signals from all strategies on all pairs
             all_signals: List[Dict] = []
             for symbol in all_symbols:
-                df = self._refresh_bars(symbol)
+                df = self._cache.get(symbol, pd.DataFrame())
                 if df.empty or len(df) < 50:
                     log.warning(f"  {symbol}: skipped — insufficient bars ({len(df)})")
                     continue
 
-                signals = self._evaluate_all_strategies(symbol, df)
+                # Regime gating: only run strategies appropriate for detected regime
+                regime = regimes.get(symbol, Regime.CHOPPY)
+                allowed = REGIME_STRATEGIES.get(regime, set())
+
+                # Vol filter: block entries if volatility is extreme
+                vr = vol_results.get(symbol)
+                if vr and not vr.allow_entry:
+                    log.info(f"  {symbol}: BLOCKED by vol filter (vol_ratio={vr.vol_ratio:.2f}, regime={vr.vol_regime})")
+                    # Still allow exits for held positions by keeping exit-capable strategies
+                    if symbol in held:
+                        allowed = {s.name for s in self.strategies}  # allow exit signals through
+                    else:
+                        continue
+
+                stop_mult = vr.stop_mult if vr else 1.0
+                signals = self._evaluate_all_strategies(symbol, df, allowed_strategies=allowed, stop_mult=stop_mult)
                 all_signals.extend(signals)
 
             # Arbitrate
