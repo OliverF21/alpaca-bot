@@ -31,7 +31,10 @@
       "Bash(curl -s http://localhost:8000/api/positions)",
       "Bash(python3 -m json.tool)",
       "Bash(curl -s http://localhost:8000/api/crypto/positions)",
-      "Bash(curl -s \"http://localhost:8000/api/equity-log?days=7\")"
+      "Bash(curl -s \"http://localhost:8000/api/equity-log?days=7\")",
+      "Bash(gh api:*)",
+      "Bash(python3 -c \"from scanner.regime_detector import RegimeDetector, Regime, REGIME_STRATEGIES; print\\('regime_detector OK'\\)\")",
+      "Bash(python3 -c \"from scanner.vol_filter import VolatilityFilter, VolResult; print\\('vol_filter OK'\\)\")"
     ]
   }
 }
