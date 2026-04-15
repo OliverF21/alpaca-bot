@@ -58,6 +58,28 @@ _DIAG_COLS = {
     "crypto_supertrend":      ["close", "supertrend", "supertrend_dir", "rsi"],
     "crypto_breakout":        ["close", "donch_high", "donch_mid", "atr", "atr_sma"],
 }
+
+_CRYPTO_BASES = {"BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "UNI", "AAVE",
+                 "DOT", "MATIC", "SHIB", "LTC", "XRP", "ADA", "ATOM", "ALGO"}
+
+def _is_crypto(symbol: str) -> bool:
+    """Alpaca returns 'DOGEUSD' for positions but 'DOGE/USD' for orders."""
+    if "/" in symbol:
+        return True
+    for suffix in ("USD", "USDT", "USDC"):
+        if symbol.endswith(suffix) and symbol[:-len(suffix)] in _CRYPTO_BASES:
+            return True
+    return False
+
+def _normalize_symbol(symbol: str) -> str:
+    """'DOGEUSD' → 'DOGE/USD' so it matches the universe and _position_meta keys."""
+    if "/" in symbol:
+        return symbol
+    for suffix in ("USDT", "USDC", "USD"):
+        if symbol.endswith(suffix) and symbol[:-len(suffix)] in _CRYPTO_BASES:
+            return symbol[:-len(suffix)] + "/" + suffix
+    return symbol
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -361,7 +383,7 @@ class CryptoScanner:
             time.sleep(300)
             try:
                 positions = self._safe_open_positions()
-                positions = {s: p for s, p in positions.items() if "/" in s}
+                positions = {_normalize_symbol(s): p for s, p in positions.items() if _is_crypto(s)}
 
                 for symbol, pos in positions.items():
                     meta = self._position_meta.get(symbol)
@@ -436,7 +458,7 @@ class CryptoScanner:
                 self._cooldowns[symbol] += 1
 
             positions = self._safe_open_positions()
-            positions = {s: p for s, p in positions.items() if "/" in s}
+            positions = {_normalize_symbol(s): p for s, p in positions.items() if _is_crypto(s)}
             held: Set[str] = set(positions.keys())
 
             universe = self._ranker.get_universe()

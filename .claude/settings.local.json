@@ -27,7 +27,9 @@
       "Bash(python -m pytest strategy_ide/tests/test_universe.py -v)",
       "Bash(cat)",
       "Read(//tmp/**)",
-      "Bash(python -c ':*)"
+      "Bash(python -c ':*)",
+      "Bash(curl -s http://localhost:8000/api/positions)",
+      "Bash(python3 -m json.tool)"
     ]
   }
 }

@@ -172,7 +172,7 @@ def get_account():
 
 @app.get("/api/positions")
 def get_positions():
-    """Return equity-only positions (excludes crypto symbols with '/')."""
+    """Return equity-only positions (excludes crypto)."""
     try:
         positions = _trader.get_all_positions()
         return [
@@ -187,7 +187,7 @@ def get_positions():
                 "change_today":     float(p.change_today) * 100,
             }
             for p in positions
-            if "/" not in p.symbol
+            if not _is_crypto(p.symbol)
         ]
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -287,9 +287,20 @@ def get_equity_log(days: int = 30):
     # Always fetch Alpaca portfolio history (1-day bars) as fallback/supplement
     # This ensures we always have equity data even on fresh install
     try:
+        # Map days to Alpaca period strings to avoid fetching excess data
+        if days <= 7:
+            period_str = "1W"
+        elif days <= 30:
+            period_str = "1M"
+        elif days <= 90:
+            period_str = "3M"
+        elif days <= 365:
+            period_str = "1A"
+        else:
+            period_str = "1A"   # max Alpaca supports
         hist_req = GetPortfolioHistoryRequest(
-            period="1A",      # 1 year history
-            timeframe="1D",   # 1-day bars
+            period=period_str,
+            timeframe="1D",
         )
         portfolio_hist = _trader.get_portfolio_history(hist_req)
         if portfolio_hist and hasattr(portfolio_hist, 'timestamp') and hasattr(portfolio_hist, 'equity'):
@@ -316,6 +327,10 @@ def get_equity_log(days: int = 30):
     df = pd.concat(frames, ignore_index=True)
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
     df = df.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates("timestamp")
+
+    # Apply cutoff filter (Alpaca API returns full period regardless of `days` param)
+    cutoff_dt = pd.Timestamp(cutoff)
+    df = df[df["timestamp"] >= cutoff_dt]
 
     # Downsample to max 500 points for chart performance
     if len(df) > 500:
@@ -418,14 +433,39 @@ def run_backtest_api(req: BacktestRequest):
 
 # ── Crypto: positions ─────────────────────────────────────────────────────────
 
+_CRYPTO_BASES = {"BTC", "ETH", "SOL", "DOGE", "AVAX", "LINK", "UNI", "AAVE",
+                 "DOT", "MATIC", "SHIB", "LTC", "XRP", "ADA", "ATOM", "ALGO"}
+
+def _is_crypto(symbol: str) -> bool:
+    """Detect crypto positions — Alpaca returns 'DOGEUSD' (no slash) for positions
+    but 'DOGE/USD' for orders. Handle both formats."""
+    if "/" in symbol:
+        return True
+    # Strip common quote suffixes
+    for suffix in ("USD", "USDT", "USDC", "BTC", "ETH"):
+        if symbol.endswith(suffix):
+            base = symbol[:-len(suffix)]
+            if base in _CRYPTO_BASES:
+                return True
+    return False
+
+def _format_crypto_symbol(symbol: str) -> str:
+    """Normalize 'DOGEUSD' → 'DOGE/USD' for display."""
+    if "/" in symbol:
+        return symbol
+    for suffix in ("USDT", "USDC", "USD"):
+        if symbol.endswith(suffix):
+            return symbol[:-len(suffix)] + "/" + suffix
+    return symbol
+
 @app.get("/api/crypto/positions")
 def get_crypto_positions():
-    """Return only crypto positions (symbol contains '/')."""
+    """Return only crypto positions."""
     try:
         positions = _trader.get_all_positions()
         return [
             {
-                "symbol":           p.symbol,
+                "symbol":           _format_crypto_symbol(p.symbol),
                 "qty":              float(p.qty),
                 "entry":            float(p.avg_entry_price),
                 "current":          float(p.current_price),
@@ -435,7 +475,7 @@ def get_crypto_positions():
                 "change_today":     float(p.change_today) * 100,
             }
             for p in positions
-            if "/" in p.symbol
+            if _is_crypto(p.symbol)
         ]
     except Exception as e:
         raise HTTPException(500, str(e))
