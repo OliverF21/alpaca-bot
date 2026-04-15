@@ -2,20 +2,17 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# System deps for numpy/pandas compilation + curl for healthcheck + git + ssh
+# System deps for numpy/pandas compilation + curl for healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ curl git ssh && \
+    gcc g++ curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Set up SSH for git operations
-RUN mkdir -p /root/.ssh && \
-    ssh-keyscan -H github.com >> /root/.ssh/known_hosts 2>/dev/null
-
-# Clone the latest code from GitHub using SSH
-RUN --mount=type=ssh git clone git@github.com:OliverF21/alpaca-bot.git /app
-
-# Install Python dependencies
+# Install Python dependencies first (layer caches unless requirements change)
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project code
+COPY . .
 
 # Create directories the app expects
 RUN mkdir -p logs equity_logs backtest_results /tmp/bot_logs
