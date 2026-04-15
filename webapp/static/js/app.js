@@ -143,9 +143,12 @@ async function loadEquityLog(days, tabEl=null) {
     const layout = plotLayout();
     layout.yaxis.range = [yFloor, yMax + yPad];
 
-    Plotly.react(container, [{
+    // Invisible baseline trace at yFloor, then fill between it and equity line
+    const baseline = { x: xs, y: xs.map(() => yFloor), type: 'scatter', mode: 'lines',
+      line: { color: 'transparent', width: 0 }, showlegend: false, hoverinfo: 'skip' };
+    Plotly.react(container, [baseline, {
       x: xs, y: ys, type: 'scatter', mode: 'lines',
-      fill: 'tozeroy', fillcolor: fillColor,
+      fill: 'tonexty', fillcolor: fillColor,
       line: { color: lineColor, width: 2 },
       hovertemplate: '%{x}<br><b>$%{y:,.2f}</b><extra></extra>',
     }], layout, { displayModeBar: false, responsive: true });
