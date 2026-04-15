@@ -172,6 +172,7 @@ def get_account():
 
 @app.get("/api/positions")
 def get_positions():
+    """Return equity-only positions (excludes crypto symbols with '/')."""
     try:
         positions = _trader.get_all_positions()
         return [
@@ -186,6 +187,7 @@ def get_positions():
                 "change_today":     float(p.change_today) * 100,
             }
             for p in positions
+            if "/" not in p.symbol
         ]
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -212,6 +214,54 @@ def get_orders(limit: int = 40):
                 "created_at": o.created_at.isoformat() if o.created_at else None,
             })
         return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/trades")
+def get_closed_trades(limit: int = 50):
+    """Pair filled BUY/SELL orders into round-trip trades with P&L."""
+    try:
+        req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=200)
+        orders = _trader.get_orders(req)
+
+        # Only filled orders with a price
+        fills = [
+            o for o in orders
+            if o.status.value == "filled" and o.filled_avg_price
+        ]
+        # Oldest first so we match buys before sells
+        fills.sort(key=lambda o: o.filled_at or o.created_at)
+
+        # Track open buys per symbol
+        open_buys: dict[str, list] = {}
+        trades = []
+
+        for o in fills:
+            sym = o.symbol
+            if o.side.value == "buy":
+                open_buys.setdefault(sym, []).append(o)
+            elif o.side.value == "sell" and open_buys.get(sym):
+                buy = open_buys[sym].pop(0)
+                buy_price = float(buy.filled_avg_price)
+                sell_price = float(o.filled_avg_price)
+                qty = min(float(buy.qty), float(o.qty))
+                pnl = (sell_price - buy_price) * qty
+                pnl_pct = ((sell_price - buy_price) / buy_price) * 100 if buy_price else 0
+                trades.append({
+                    "symbol":     sym,
+                    "qty":        qty,
+                    "buy_price":  round(buy_price, 4),
+                    "sell_price": round(sell_price, 4),
+                    "pnl":        round(pnl, 2),
+                    "pnl_pct":    round(pnl_pct, 2),
+                    "entry_time": (buy.filled_at or buy.created_at).isoformat(),
+                    "exit_time":  (o.filled_at or o.created_at).isoformat(),
+                })
+
+        # Most recent first, capped
+        trades.reverse()
+        return trades[:limit]
     except Exception as e:
         raise HTTPException(500, str(e))
 

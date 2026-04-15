@@ -139,6 +139,19 @@
       <button class="btn-refresh" onclick="loadActivity()">↻ Refresh</button>
     </div>
     <div class="card glass">
+      <h3 style="margin:0 0 12px;color:var(--text-2);font-size:13px;text-transform:uppercase;letter-spacing:0.5px">Closed Trades</h3>
+      <table class="activity-table" id="trades-table">
+        <thead>
+          <tr>
+            <th>Entry</th><th>Exit</th><th>Symbol</th>
+            <th>Qty</th><th>Buy</th><th>Sell</th><th>P&amp;L</th><th>%</th>
+          </tr>
+        </thead>
+        <tbody id="trades-body"></tbody>
+      </table>
+    </div>
+    <div class="card glass" style="margin-top:16px">
+      <h3 style="margin:0 0 12px;color:var(--text-2);font-size:13px;text-transform:uppercase;letter-spacing:0.5px">Recent Orders</h3>
       <table class="activity-table" id="activity-table">
         <thead>
           <tr>

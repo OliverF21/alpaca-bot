@@ -198,29 +198,62 @@ async function loadPositions() {
    ACTIVITY PAGE
 ══════════════════════════════════════════════════════════════════════ */
 async function loadActivity() {
-  const tbody = $('activity-body');
+  // Load closed trades and recent orders in parallel
   try {
-    const orders = await api('/api/orders');
-    if (!orders.length) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-3);padding:40px">No orders yet</td></tr>`;
-      return;
+    const [trades, orders] = await Promise.all([api('/api/trades'), api('/api/orders')]);
+
+    // Closed trades table
+    const tBody = $('trades-body');
+    if (!trades.length) {
+      tBody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-3);padding:40px">No closed trades yet</td></tr>`;
+    } else {
+      tBody.innerHTML = trades.map(t => {
+        const cls = t.pnl >= 0 ? 'pos' : 'neg';
+        const color = t.pnl >= 0 ? 'var(--green)' : 'var(--red)';
+        const sgn = t.pnl >= 0 ? '+' : '';
+        const entryTime = new Date(t.entry_time).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+        const exitTime  = new Date(t.exit_time).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+        const qtyFmt = t.symbol.includes('/') ? Number(t.qty).toFixed(4).replace(/\.?0+$/, '') : t.qty;
+        return `
+          <tr>
+            <td style="color:var(--text-2);font-size:12px">${entryTime}</td>
+            <td style="color:var(--text-2);font-size:12px">${exitTime}</td>
+            <td><strong>${t.symbol}</strong></td>
+            <td>${qtyFmt}</td>
+            <td>${fmt(t.buy_price)}</td>
+            <td>${fmt(t.sell_price)}</td>
+            <td style="color:${color};font-weight:600">${sgn}${fmt(t.pnl)}</td>
+            <td style="color:${color};font-weight:600">${sgn}${t.pnl_pct}%</td>
+          </tr>`;
+      }).join('');
     }
-    tbody.innerHTML = orders.map(o => {
-      const time  = o.filled_at ? new Date(o.filled_at).toLocaleString() : (o.created_at ? new Date(o.created_at).toLocaleString() : '—');
-      const price = o.fill_price ? fmt(o.fill_price) : '—';
-      const side  = o.side.toUpperCase();
-      return `
-        <tr>
-          <td style="color:var(--text-2);font-size:12px">${time}</td>
-          <td><strong>${o.symbol}</strong></td>
-          <td><span class="badge badge-${o.side}">${side}</span></td>
-          <td>${o.qty}</td>
-          <td>${price}</td>
-          <td style="color:var(--text-2)">${o.type}</td>
-          <td style="color:var(--text-2)">${o.status}</td>
-        </tr>`;
-    }).join('');
-  } catch(e) { tbody.innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:20px">${e.message}</td></tr>`; }
+
+    // Recent orders table
+    const oBody = $('activity-body');
+    if (!orders.length) {
+      oBody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-3);padding:40px">No orders yet</td></tr>`;
+    } else {
+      oBody.innerHTML = orders.map(o => {
+        const time  = o.filled_at ? new Date(o.filled_at).toLocaleString() : (o.created_at ? new Date(o.created_at).toLocaleString() : '—');
+        const price = o.fill_price ? fmt(o.fill_price) : '—';
+        const side  = o.side.toUpperCase();
+        return `
+          <tr>
+            <td style="color:var(--text-2);font-size:12px">${time}</td>
+            <td><strong>${o.symbol}</strong></td>
+            <td><span class="badge badge-${o.side}">${side}</span></td>
+            <td>${o.qty}</td>
+            <td>${price}</td>
+            <td style="color:var(--text-2)">${o.type}</td>
+            <td style="color:var(--text-2)">${o.status}</td>
+          </tr>`;
+      }).join('');
+    }
+  } catch(e) {
+    const msg = `<tr><td colspan="8" style="color:var(--red);padding:20px">${e.message}</td></tr>`;
+    $('trades-body').innerHTML = msg;
+    $('activity-body').innerHTML = msg;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
