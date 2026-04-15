@@ -135,12 +135,20 @@ async function loadEquityLog(days, tabEl=null) {
     const lineColor = isPos ? '#00d4aa' : '#ff5b5b';
     const fillColor = isPos ? 'rgba(0,212,170,0.08)' : 'rgba(255,91,91,0.08)';
 
+    // Scale y-axis — floor at 85% of min value to show fluctuations with context
+    const yMin = Math.min(...ys);
+    const yMax = Math.max(...ys);
+    const yFloor = Math.floor(yMin * 0.85 / 5000) * 5000;  // round down to nearest $5k
+    const yPad = (yMax - yMin) * 0.05 || yMax * 0.02;
+    const layout = plotLayout();
+    layout.yaxis.range = [yFloor, yMax + yPad];
+
     Plotly.react(container, [{
       x: xs, y: ys, type: 'scatter', mode: 'lines',
       fill: 'tozeroy', fillcolor: fillColor,
       line: { color: lineColor, width: 2 },
       hovertemplate: '%{x}<br><b>$%{y:,.2f}</b><extra></extra>',
-    }], plotLayout(), { displayModeBar: false, responsive: true });
+    }], layout, { displayModeBar: false, responsive: true });
 
   } catch(e) { console.warn('No equity log:', e); }
 }

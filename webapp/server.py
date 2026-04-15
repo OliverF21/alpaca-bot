@@ -441,12 +441,9 @@ def _is_crypto(symbol: str) -> bool:
     but 'DOGE/USD' for orders. Handle both formats."""
     if "/" in symbol:
         return True
-    # Strip common quote suffixes
-    for suffix in ("USD", "USDT", "USDC", "BTC", "ETH"):
-        if symbol.endswith(suffix):
-            base = symbol[:-len(suffix)]
-            if base in _CRYPTO_BASES:
-                return True
+    for suffix in ("USDT", "USDC", "USD"):
+        if symbol.endswith(suffix) and symbol[:-len(suffix)] in _CRYPTO_BASES:
+            return True
     return False
 
 def _format_crypto_symbol(symbol: str) -> str:

@@ -29,7 +29,9 @@
       "Read(//tmp/**)",
       "Bash(python -c ':*)",
       "Bash(curl -s http://localhost:8000/api/positions)",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:8000/api/crypto/positions)",
+      "Bash(curl -s \"http://localhost:8000/api/equity-log?days=7\")"
     ]
   }
 }
