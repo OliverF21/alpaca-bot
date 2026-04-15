@@ -29,14 +29,23 @@ function navigate(page) {
   $(`page-${page}`).classList.add('active');
   document.querySelector(`[data-page="${page}"]`).classList.add('active');
 
-  const loaders = { portfolio: loadPortfolio, positions: loadPositions, activity: loadActivity, crypto: loadCryptoPositions };
+  const loaders = {
+    portfolio: loadPortfolio,
+    positions: loadPositions,
+    activity:  loadActivity,
+    crypto:    loadCryptoPositions,
+    logs:      loadLogs,
+  };
 
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
 
   const loader = loaders[page];
   if (loader) {
-    loader();
-    _pollTimer = setInterval(loader, POLL_INTERVAL_MS);
+    // Call loader once; then set up polling. Loader errors don't break the timer.
+    loader().catch(e => console.warn(`Initial load failed for ${page}:`, e));
+    _pollTimer = setInterval(() => {
+      loader().catch(e => console.warn(`Poll load failed for ${page}:`, e));
+    }, POLL_INTERVAL_MS);
   }
 }
 
@@ -529,6 +538,37 @@ async function loadArbitratorStatus() {
   } catch(e) {
     $('arb-decisions-empty').textContent = `Error: ${e.message}`;
     $('arb-decisions-empty').style.display = 'block';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   LOGS PAGE
+══════════════════════════════════════════════════════════════════════ */
+async function loadLogs() {
+  try {
+    const data = await api('/api/logs');
+    const eqLog = data.equity || [];
+    const crLog = data.crypto || [];
+
+    const eqOut = $('equity-log-output');
+    const crOut = $('crypto-log-output');
+
+    eqOut.textContent = eqLog.length ? eqLog.join('') : 'No logs available';
+    crOut.textContent = crLog.length ? crLog.join('') : 'No logs available';
+
+    // Update line-count badges
+    const eqBadge = $('equity-log-badge');
+    const crBadge = $('crypto-log-badge');
+    if (eqBadge) eqBadge.textContent = `${eqLog.length} lines`;
+    if (crBadge) crBadge.textContent = `${crLog.length} lines`;
+
+    // Auto-scroll to bottom
+    eqOut.scrollTop = eqOut.scrollHeight;
+    crOut.scrollTop = crOut.scrollHeight;
+  } catch(e) {
+    console.error('Logs load error:', e);
+    $('equity-log-output').textContent = `Error: ${e.message}`;
+    $('crypto-log-output').textContent = `Error: ${e.message}`;
   }
 }
 
