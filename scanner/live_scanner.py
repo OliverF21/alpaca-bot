@@ -65,10 +65,6 @@ class LiveScanner:
         Strategy instance (tuned for the chosen resolution).
     watchlist : list[str]
         Broad universe for the screener.
-    core_symbols : list[str]
-        Symbols that are ALWAYS evaluated every poll, bypassing the screener.
-        This guarantees the scanner always has something to trade even when
-        the screener returns zero candidates.
     poll_interval : int
         Seconds between signal checks.
     screen_interval : int
@@ -95,7 +91,6 @@ class LiveScanner:
         self,
         strategy: BaseStrategy,
         watchlist: List[str]      = WATCHLIST_SP100,
-        core_symbols: List[str]   = None,
         poll_interval: int        = 900,
         screen_interval: int      = 1800,
         warmup_bars: int          = 60,
@@ -109,7 +104,6 @@ class LiveScanner:
     ):
         self.strategy         = strategy
         self.watchlist        = watchlist
-        self.core_symbols     = core_symbols or []
         self.poll_interval    = poll_interval
         self.screen_interval  = screen_interval
         self.warmup_bars      = warmup_bars
@@ -525,9 +519,12 @@ class LiveScanner:
             if stale:
                 self._trailing_moved -= stale
 
-            # Merge core symbols (always evaluated) with screener candidates
+            # Poll strategy: evaluate all held positions (regardless of entry source)
+            # plus screener candidates. Held positions ALWAYS get monitored, so if
+            # you hold ADBE from a manual trade, the scanner will exit it if the
+            # strategy triggers an exit signal. See issue #12 (core_symbols antipattern).
             poll_symbols = list(dict.fromkeys(
-                self.core_symbols + self._active_symbols
+                list(positions.keys()) + self._active_symbols
             ))
 
             for symbol in poll_symbols:

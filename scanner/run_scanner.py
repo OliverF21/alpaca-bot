@@ -51,14 +51,9 @@ VWAP_STRATEGY = VWAPReversionStrategy(
     take_profit_pct = 0.01,   # 1.0% TP
 )
 
-# Core symbols always evaluated every poll (bypass screener).
-# These are the most liquid US equities — tight spreads, deep books.
-VWAP_CORE = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "META", "AMZN", "TSLA"]
-
 vwap_scanner = LiveScanner(
     strategy        = VWAP_STRATEGY,
     watchlist       = WATCHLIST_LARGE_CAP,
-    core_symbols    = VWAP_CORE,
     poll_interval   = 300,       # every 5 minutes
     screen_interval = 1800,      # re-scan every 30 min
     warmup_bars     = 80,        # ~6.5 hours of 5-min bars
@@ -89,19 +84,16 @@ HYBRID_STRATEGY = HybridTrendMRStrategy(
     trend_buffer_pct = 0.005,  # tighter buffer
 )
 
-HYBRID_CORE = ["META", "JPM", "MSFT", "AMZN"]
-
 hybrid_scanner = LiveScanner(
     strategy        = HYBRID_STRATEGY,
     watchlist       = WATCHLIST_SP100,
-    core_symbols    = HYBRID_CORE,
     poll_interval   = 900,       # every 15 min
     screen_interval = 1800,
     warmup_bars     = 120,       # ~30 hours of 15-min bars
     max_positions   = 3,
     risk_pct        = 0.002,     # 0.2% risk per trade (reduced from 1%)
     stop_loss_pct   = 0.02,
-    take_profit_pct = 0.035,
+    take_profit_pct = 0.035,     # 3.5% TP
     resolution      = "15",
     confirm_bars    = 1,         # reduced from 2 — signals are fleeting
 )

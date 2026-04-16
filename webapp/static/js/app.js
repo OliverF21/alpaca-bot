@@ -33,7 +33,10 @@ function navigate(page) {
     portfolio: loadPortfolio,
     positions: loadPositions,
     activity:  loadActivity,
-    crypto:    loadCryptoPositions,
+    crypto:    async () => {
+      await loadCryptoPositions();
+      await loadArbitratorStatus();
+    },
     logs:      loadLogs,
   };
 
@@ -440,8 +443,6 @@ async function loadCryptoPositions() {
 
     renderCryptoHoldings(pos);
   } catch(e) { console.error('Crypto positions load error:', e); }
-  // Also load arbitrator status on crypto page load
-  loadArbitratorStatus();
 }
 
 function renderCryptoHoldings(positions) {
