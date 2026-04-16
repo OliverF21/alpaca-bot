@@ -612,12 +612,20 @@ class LiveScanner:
         candidates           = self._screener.scan()
         self._active_symbols = [c["symbol"] for c in candidates]
 
-        # Warm up screener candidates (skip already-warmed core symbols)
+        # Warm up screener candidates
         to_warm = [s for s in self._active_symbols if s not in self._cache]
         if to_warm:
             self._warmup(to_warm)
         elif not self._active_symbols:
-            log.info("No initial screener candidates — core symbols still active")
+            log.info("No initial screener candidates")
+
+        # Warm up any held positions not already cached — these must be monitored
+        # for exits regardless of whether they appear in the screener.
+        held = list(self._open_positions().keys())
+        held_to_warm = [s for s in held if s not in self._cache]
+        if held_to_warm:
+            log.info(f"Warming up {len(held_to_warm)} held position(s): {held_to_warm}")
+            self._warmup(held_to_warm)
 
         threading.Thread(
             target=self._screener_loop, daemon=True, name="screener"
