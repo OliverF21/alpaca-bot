@@ -606,13 +606,7 @@ class LiveScanner:
         log.info(f"  Polls    : every {self.poll_interval}s")
         log.info(f"  Scans    : every {self.screen_interval}s")
         log.info(f"  Confirm  : {self.confirm_bars} bar(s)")
-        if self.core_symbols:
-            log.info(f"  Core     : {self.core_symbols}")
         log.info(f"{'━'*55}\n")
-
-        # Always warm up core symbols first
-        if self.core_symbols:
-            self._warmup(self.core_symbols)
 
         log.info("Running initial screen...")
         candidates           = self._screener.scan()
