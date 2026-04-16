@@ -509,6 +509,9 @@ class LiveScanner:
 
             # Improvement 4: safe reconnect — retry up to 3× on API errors
             positions = self._safe_open_positions()
+            # Equity scanner only — strip crypto positions (e.g. AVAXUSD) so they
+            # aren't evaluated with equity strategies or counted against max_positions.
+            positions = {s: p for s, p in positions.items() if not s.endswith("USD")}
             n_open    = len(positions)
 
             # Reconcile trailing-stop tracking against live positions. If a
@@ -621,7 +624,7 @@ class LiveScanner:
 
         # Warm up any held positions not already cached — these must be monitored
         # for exits regardless of whether they appear in the screener.
-        held = list(self._open_positions().keys())
+        held = [s for s in self._open_positions().keys() if not s.endswith("USD")]
         held_to_warm = [s for s in held if s not in self._cache]
         if held_to_warm:
             log.info(f"Warming up {len(held_to_warm)} held position(s): {held_to_warm}")
