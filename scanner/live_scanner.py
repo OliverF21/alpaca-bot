@@ -14,6 +14,7 @@ Flow:
   - A background thread re-runs the screener every screen_interval seconds
 """
 
+import csv
 import datetime
 import logging
 import os
@@ -317,6 +318,30 @@ class LiveScanner:
     def _open_positions(self) -> Dict[str, object]:
         return {p.symbol: p for p in self._trader.get_all_positions()}
 
+    def _append_trade_log(
+        self, symbol: str, side: str, qty: int, price: float,
+        reason: str = "", pnl: float = None,
+    ):
+        """Append one row to equity_logs/trades.csv — permanent audit trail (issue #16)."""
+        log_dir = os.path.join(os.path.dirname(__file__), "..", "equity_logs")
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, "trades.csv")
+        is_new = not os.path.exists(path)
+        with open(path, "a", newline="") as f:
+            writer = csv.writer(f)
+            if is_new:
+                writer.writerow([
+                    "timestamp", "symbol", "side", "qty", "price",
+                    "strategy", "reason", "realized_pnl",
+                ])
+            writer.writerow([
+                datetime.datetime.now().isoformat(),
+                symbol, side, qty,
+                f"{price:.4f}" if not pd.isna(price) else "",
+                self.strategy.name, reason,
+                f"{pnl:.2f}" if pnl is not None else "",
+            ])
+
     def _equity(self) -> float:
         return float(self._trader.get_account().equity)
 
@@ -409,6 +434,7 @@ class LiveScanner:
                 take_profit   = {"limit_price": tp},
             ))
             self._position_entry_prices[symbol] = price
+            self._append_trade_log(symbol, "BUY", qty, price, reason=reason)
         except Exception as e:
             log.error(f"  ✗ Order failed for {symbol}: {e}")
 
@@ -469,6 +495,7 @@ class LiveScanner:
 
         # Track realized daily PnL
         entry = self._position_entry_prices.pop(symbol, None)
+        realized = None
         if entry and not pd.isna(current_price):
             realized = (current_price - entry) * sell_qty
             today    = datetime.date.today().isoformat()
@@ -476,6 +503,9 @@ class LiveScanner:
             log.info(
                 f"  Daily realized PnL ({today}): ${self._daily_pnl[today]:+.2f}"
             )
+        self._append_trade_log(
+            symbol, "SELL", sell_qty, current_price, reason=reason, pnl=realized
+        )
 
     # ── Screener loop ─────────────────────────────────────────────────────────
 
@@ -629,6 +659,39 @@ class LiveScanner:
         if held_to_warm:
             log.info(f"Warming up {len(held_to_warm)} held position(s): {held_to_warm}")
             self._warmup(held_to_warm)
+
+        # Issue #14: Restore protective stops for held positions with no open stop order.
+        # Alpaca bracket stops expire EOD — any position surviving overnight is unprotected.
+        # On startup, check each held position for an existing stop order and place a fresh
+        # GTC stop at entry_price * (1 - stop_loss_pct) if none exists.
+        from alpaca.trading.requests import StopOrderRequest
+        for symbol in held:
+            try:
+                req = GetOrdersRequest(status=QueryOrderStatus.OPEN, symbols=[symbol])
+                open_orders = self._trader.get_orders(req)
+                has_stop = any(
+                    getattr(o, "stop_price", None) is not None for o in open_orders
+                )
+                if not has_stop:
+                    pos        = self._trader.get_open_position(symbol)
+                    entry      = float(pos.avg_entry_price)
+                    stop_price = round(entry * (1 - self.stop_loss_pct), 2)
+                    qty        = abs(int(float(pos.qty)))
+                    self._trader.submit_order(StopOrderRequest(
+                        symbol        = symbol,
+                        qty           = qty,
+                        side          = OrderSide.SELL,
+                        time_in_force = TimeInForce.GTC,
+                        stop_price    = stop_price,
+                    ))
+                    log.info(
+                        f"  STARTUP STOP {symbol}: entry={entry:.2f}  "
+                        f"stop={stop_price:.2f}  qty={qty}  (no existing stop found)"
+                    )
+                else:
+                    log.info(f"  STARTUP STOP {symbol}: existing stop order found — no action")
+            except Exception as e:
+                log.warning(f"  Could not place startup stop for {symbol}: {e}")
 
         threading.Thread(
             target=self._screener_loop, daemon=True, name="screener"

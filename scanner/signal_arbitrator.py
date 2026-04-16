@@ -21,7 +21,7 @@ _STRATEGY_PRIORITY = {
     "crypto_mean_reversion": 1,
 }
 
-COOLDOWN_BARS = 3
+COOLDOWN_BARS = 6  # 6 × 1h bars = 6h minimum between re-entries per symbol
 
 
 class SignalArbitrator:
@@ -37,6 +37,11 @@ class SignalArbitrator:
     ) -> List[Dict]:
         if not signals:
             return []
+
+        # Log current cooldown state so we can verify it's working
+        active_cooldowns = {s: b for s, b in cooldowns.items() if b <= COOLDOWN_BARS}
+        if active_cooldowns:
+            log.info(f"  Active cooldowns: { {s: f'{b}/{COOLDOWN_BARS}' for s, b in active_cooldowns.items()} }")
 
         by_symbol: Dict[str, List[Dict]] = {}
         for sig in signals:

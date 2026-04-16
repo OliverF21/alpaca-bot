@@ -13,6 +13,7 @@ Thread structure:
   - Background thread 2: Position monitor (stop/TP checks every 5 min)
 """
 
+import csv
 import datetime
 import logging
 import os
@@ -155,6 +156,32 @@ class CryptoScanner:
             time.sleep(1800)
             return True
         return False
+
+    # ── Trade log ────────────────────────────────────────────────────────────
+
+    def _append_trade_log(
+        self, symbol: str, side: str, qty: float, price: float,
+        strategy: str = "", pnl: float = None,
+    ):
+        """Append one row to equity_logs/trades.csv — permanent audit trail (issue #16)."""
+        log_dir = os.path.join(os.path.dirname(__file__), "..", "equity_logs")
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, "trades.csv")
+        is_new = not os.path.exists(path)
+        with open(path, "a", newline="") as f:
+            writer = csv.writer(f)
+            if is_new:
+                writer.writerow([
+                    "timestamp", "symbol", "side", "qty", "price",
+                    "strategy", "reason", "realized_pnl",
+                ])
+            writer.writerow([
+                datetime.datetime.now().isoformat(),
+                symbol, side, f"{qty:.6f}",
+                f"{price:.6f}" if not pd.isna(price) else "",
+                strategy, "",
+                f"{pnl:.6f}" if pnl is not None else "",
+            ])
 
     # ── Portfolio helpers ─────────────────────────────────────────────────────
 
@@ -343,6 +370,7 @@ class CryptoScanner:
             "take_profit_price": tp,
             "trailing": use_trailing,
         }
+        self._append_trade_log(symbol, "BUY", qty, price, strategy=action["strategy"])
 
     def _exit(self, symbol: str, qty: str, current_price: float = float("nan")):
         qty_float = abs(float(qty))
@@ -391,12 +419,18 @@ class CryptoScanner:
             log.error(f"  ✗ EXIT submit failed for {symbol}: {e}")
             return
 
-        entry = self._position_meta.pop(symbol, {}).get("entry_price")
+        meta = self._position_meta.pop(symbol, {})
+        entry = meta.get("entry_price")
+        realized = None
         if entry and not pd.isna(current_price):
             realized = (current_price - entry) * qty_float
             today = datetime.date.today().isoformat()
             self._daily_pnl[today] = self._daily_pnl.get(today, 0.0) + realized
             log.info(f"  Daily realized PnL ({today}): ${self._daily_pnl[today]:+.2f}")
+        self._append_trade_log(
+            symbol, "SELL", qty_float, current_price,
+            strategy=meta.get("strategy", ""), pnl=realized,
+        )
 
         # Start cooldown
         self._cooldowns[symbol] = 0
