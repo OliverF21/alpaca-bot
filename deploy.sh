@@ -3,8 +3,8 @@
 # deploy.sh — Push local changes and deploy to the Oracle Cloud VM.
 #
 # Usage:
-#   ./deploy.sh opc@<vm-ip>        # push + deploy
-#   ./deploy.sh opc@<vm-ip> --logs # push + deploy + tail logs
+#   ./deploy.sh ubuntu@<vm-ip>        # push + deploy
+#   ./deploy.sh ubuntu@<vm-ip> --logs # push + deploy + tail logs
 #
 # First time: run oracle_setup.sh on the VM first.
 

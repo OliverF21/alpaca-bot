@@ -1,28 +1,26 @@
 #!/usr/bin/env bash
 #
-# oracle_setup.sh — Bootstrap an Oracle Linux VM (OCI Free Tier) as a headless Alpaca Bot server.
+# oracle_setup.sh — Bootstrap an Oracle Cloud Free Tier VM (Ubuntu) as a headless Alpaca Bot server.
 #
 # Runs the full run_all.py stack (equity scanner + crypto scanner + web dashboard)
 # as a systemd service with auto-restart, plus a cron-driven git auto-deploy.
 #
 # What it does (idempotently — safe to re-run):
-#   1. Installs system packages + Python 3.11 via dnf AppStream
-#   2. Opens port 8000 in firewalld (Oracle Linux firewall — separate from Security List)
-#   3. Clones https://github.com/OliverF21/alpaca-bot
-#   4. Creates a venv and installs requirements.txt
-#   5. Copies .env.example → .env if no .env exists (chmod 600)
-#   6. Installs a systemd service that runs `python -u run_all.py`
-#   7. Installs update.sh + cron job for auto-deploy on git push
-#   8. Narrow sudoers rule so cron can restart the service without a password
+#   1. Installs system packages + Python 3.13 via deadsnakes PPA
+#   2. Clones https://github.com/OliverF21/alpaca-bot
+#   3. Creates a venv and installs requirements.txt
+#   4. Copies .env.example → .env if no .env exists (chmod 600)
+#   5. Installs a systemd service that runs `python -u run_all.py`
+#   6. Installs update.sh + cron job for auto-deploy on git push
+#   7. Narrow sudoers rule so cron can restart the service without a password
 #
-# Usage (on the Oracle VM — default user is opc):
-#   scp oracle_setup.sh opc@<vm-ip>:~
-#   ssh opc@<vm-ip>
+# Usage (on the Oracle VM — default user is ubuntu):
+#   scp oracle_setup.sh ubuntu@<vm-ip>:~
+#   ssh ubuntu@<vm-ip>
 #   chmod +x oracle_setup.sh && ./oracle_setup.sh
 #
-# Before running: also open port 8000 in the Oracle Console → VCN → Security List
+# Before running: open port 8000 in the Oracle Console → VCN → Security List
 # (Ingress rule: TCP, source 0.0.0.0/0, destination port 8000)
-# Both the Security List AND firewalld must allow the port.
 #
 # Optional overrides:
 #   REPO_URL=https://github.com/OliverF21/alpaca-bot.git
@@ -43,7 +41,7 @@ BOT_CMD="${BOT_CMD:-run_all.py}"
 UPDATE_INTERVAL_MIN="${UPDATE_INTERVAL_MIN:-5}"
 RUN_USER="$(whoami)"
 
-echo "== Alpaca Bot Oracle Linux setup =="
+echo "== Alpaca Bot Oracle Cloud setup =="
 echo "  User:        $RUN_USER"
 echo "  Install dir: $INSTALL_DIR"
 echo "  Repo:        $REPO_URL ($BRANCH)"
@@ -52,21 +50,20 @@ echo "  Bot command: python -u $BOT_CMD"
 echo "  Auto-update: every ${UPDATE_INTERVAL_MIN} min"
 echo
 
-# ── 1. System packages + Python 3.11 ─────────────────────────────────────────
-echo "[1/8] Installing system packages and Python 3.11..."
-sudo dnf install -y -q \
-    python3.11 python3.11-devel \
+# ── 1. System packages + Python 3.13 ─────────────────────────────────────────
+echo "[1/7] Installing system packages and Python 3.13..."
+sudo apt-get update -qq
+sudo apt-get install -y -qq software-properties-common
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt-get update -qq
+sudo apt-get install -y -qq \
+    python3.13 python3.13-venv python3.13-dev \
     python3-pip \
-    git gcc gcc-c++ make \
-    libffi-devel openssl-devel
+    git build-essential \
+    libffi-dev libssl-dev
 
-# ── 2. firewalld — open port 8000 ─────────────────────────────────────────────
-echo "[2/8] Opening port 8000 in firewalld..."
-sudo firewall-cmd --zone=public --add-port=8000/tcp --permanent --quiet
-sudo firewall-cmd --reload --quiet
-
-# ── 3. Clone or update the repo ───────────────────────────────────────────────
-echo "[3/8] Cloning/updating repo..."
+# ── 2. Clone or update the repo ───────────────────────────────────────────────
+echo "[2/7] Cloning/updating repo..."
 if [ -d "$INSTALL_DIR/.git" ]; then
     git -C "$INSTALL_DIR" fetch --quiet
     git -C "$INSTALL_DIR" checkout --quiet "$BRANCH"
@@ -75,17 +72,17 @@ else
     git clone --quiet --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
 fi
 
-# ── 4. Virtualenv + deps ──────────────────────────────────────────────────────
-echo "[4/8] Setting up venv..."
+# ── 3. Virtualenv + deps ──────────────────────────────────────────────────────
+echo "[3/7] Setting up venv..."
 if [ ! -d "$INSTALL_DIR/.venv" ]; then
-    python3.11 -m venv "$INSTALL_DIR/.venv"
+    python3.13 -m venv "$INSTALL_DIR/.venv"
 fi
 "$INSTALL_DIR/.venv/bin/pip" install --upgrade pip wheel -q
 echo "  Installing requirements.txt..."
 "$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
 
-# ── 5. .env ───────────────────────────────────────────────────────────────────
-echo "[5/8] Checking .env..."
+# ── 4. .env ───────────────────────────────────────────────────────────────────
+echo "[4/7] Checking .env..."
 ENV_NEEDS_FILL=0
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
@@ -94,8 +91,8 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
 fi
 chmod 600 "$INSTALL_DIR/.env"
 
-# ── 6. systemd unit ───────────────────────────────────────────────────────────
-echo "[6/8] Installing systemd service..."
+# ── 5. systemd unit ───────────────────────────────────────────────────────────
+echo "[5/7] Installing systemd service..."
 sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" > /dev/null <<EOF
 [Unit]
 Description=Alpaca Bot ($SERVICE_NAME)
@@ -126,8 +123,8 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --quiet "$SERVICE_NAME"
 
-# ── 7. update.sh + sudoers + cron ─────────────────────────────────────────────
-echo "[7/8] Installing auto-update..."
+# ── 6. update.sh + sudoers + cron ─────────────────────────────────────────────
+echo "[6/7] Installing auto-update..."
 
 cat > "$INSTALL_DIR/update.sh" <<'UPDATEEOF'
 #!/bin/bash
@@ -170,8 +167,8 @@ sudo chmod 440 "/etc/sudoers.d/${SERVICE_NAME}-restart"
 CRON_LINE="*/${UPDATE_INTERVAL_MIN} * * * * $INSTALL_DIR/update.sh >> $INSTALL_DIR/update.log 2>&1"
 ( crontab -l 2>/dev/null | grep -vF "$INSTALL_DIR/update.sh" ; echo "$CRON_LINE" ) | crontab -
 
-# ── 8. Done ───────────────────────────────────────────────────────────────────
-echo "[8/8] Done."
+# ── 7. Done ───────────────────────────────────────────────────────────────────
+echo "[7/7] Done."
 echo
 if [ "$ENV_NEEDS_FILL" = "1" ]; then
     echo "  >> NEXT STEPS:"
